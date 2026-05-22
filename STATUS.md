@@ -1,8 +1,14 @@
 # STATUS
 
 ## What was built
-- Repo scaffolding: LICENSE (MIT), README.md, SPEC.md, .gitignore.
-- Wave 0 in progress.
+- Repo scaffolding: LICENSE (MIT), README.md, SPEC.md, .gitignore (committed + pushed, commit 6f76708).
+- netcoredbg built natively for arm64 macOS from source — binary works, runs as native arm64.
+- WAVE 0 COMPLETE: DAP launch-break test passed — netcoredbg launched a .NET 10 app, bound a
+  breakpoint, and hit it (`stopped` reason=breakpoint). No macOS permission/entitlement blocker.
+- WAVE 1 COMPLETE: C# .NET 10 MCP server building cleanly. DAP layer (framing + client +
+  request/response correlation + event dispatch). netcoredbg process lifecycle. Session state
+  machine + handshake. Four MCP tools (debug_launch / _attach / _disconnect / _state). 14 unit
+  tests passing. End-to-end smoke test passes against the real netcoredbg + a real test .NET app.
 
 ## Decisions made
 - **Approach:** MCP server that wraps `netcoredbg` (MIT) over the Debug Adapter Protocol — chosen
@@ -15,16 +21,26 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- Wave 0: netcoredbg arm64 source build running (cmake + make in `~/projects/netcoredbg-src/build`).
-- Feasibility of the native arm64 build is the gate for proceeding to Wave 1.
+- Wave 1 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
+- Smoke test: launch TestApp.dll with stopAtEntry → state Running → async entry-stop → state Paused
+  with lastStop reason=entry → disconnect clean. The whole MCP → DAP → ICorDebug chain works.
+- Awaiting user "go" for Wave 2 (breakpoints + execution control).
 
 ## What's next
-- Confirm the netcoredbg arm64 build succeeds and the binary runs / speaks DAP.
-- Create the Linear ticket before any Wave 1 code.
-- Wave 1: scaffold the C# MCP server + hand-rolled DAP client.
+1. Wave 2 (needs user "go"): breakpoint_set/_function/_remove/_list/_set_exception,
+   debug_continue/pause/step, breakpoint_wait.
+2. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
+   bundling is sorted (Wave 5).
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.
 - An x64 debugger can only debug x64 targets; a native arm64 netcoredbg is required to debug
   native arm64 .NET processes (and to support attach on Apple Silicon).
-- MIT LICENSE copyright holder is currently "magna-nz" — change to the correct person/company.
+- MIT LICENSE copyright holder is "magna-nz" (confirmed correct by user).
+- netcoredbg source + build tree live at `~/projects/netcoredbg-src` (separate from this repo);
+  how to vendor/bundle the binary is a Wave 5 decision.
+- DAP behavior to handle in Wave 1: `setBreakpoints` may respond `verified:false` initially, then
+  send an async `breakpoint` event upgrading to `verified:true` once the module loads. The DAP
+  client must track `breakpoint` events, not just the `setBreakpoints` response.
+- DAP launch flow confirmed: initialize → (response) → launch → `initialized` event →
+  setBreakpoints → configurationDone → process runs → `stopped` event.
