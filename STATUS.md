@@ -14,6 +14,15 @@
   semantics for breakpoint_wait). 9 new MCP tools: breakpoint_set / _set_function / _remove /
   _list / _set_exception, debug_continue / _pause / _step, breakpoint_wait. 27 unit tests passing.
   End-to-end Wave 2 smoke passes: set BP, continue, hit BP, step over, remove, continue to exit.
+- WAVE 3 COMPLETE — MVP DONE: inspection + agent value-add. InspectionService translates DAP
+  threads/stackTrace/scopes/variables/evaluate/setExpression/exceptionInfo into typed records,
+  with recursive variable expansion (depth + max-children truncation) and an exception_autopsy
+  composite that returns exception chain + top frames + top-frame locals + source snippet in
+  one call. breakpoint_wait now also returns the topmost frame and a source snippet
+  (auto-context-on-stop). 6 new MCP tools: threads_list, stacktrace_get, variables_get,
+  evaluate, variables_set, exception_autopsy. 30 unit tests passing. End-to-end Wave 3 smoke
+  validates the whole MVP loop including variables_set actually mutating runtime state
+  (set x=100, evaluate confirms 100) and exception_autopsy capturing a real NRE.
 
 ## Decisions made
 - **Approach:** MCP server that wraps `netcoredbg` (MIT) over the Debug Adapter Protocol — chosen
@@ -26,14 +35,13 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- Wave 2 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
-- 13 MCP tools live, all unit + smoke tests green. Awaiting user "go" for Wave 3.
+- Wave 3 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
+- 19 MCP tools live, MVP functionally complete. Awaiting user "go" for Wave 4.
 
 ## What's next
-1. Wave 3 (needs user "go" — MVP completes here): threads_list, stacktrace_get, variables_get
-   (recursive expansion + collection summarisation), evaluate, variables_set, exception_autopsy,
-   auto-context-on-stop.
-2. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
+1. Wave 4 (needs user "go"): hang/deadlock analyzer, data/watch breakpoints, process stdin/stdout I/O.
+2. Wave 5: package as a .NET tool, netcoredbg bundling, README, macOS setup, CI.
+3. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
    bundling is sorted (Wave 5).
 
 ## Gotchas

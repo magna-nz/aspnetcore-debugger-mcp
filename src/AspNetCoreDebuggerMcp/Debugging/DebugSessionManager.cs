@@ -1,9 +1,15 @@
 using AspNetCoreDebuggerMcp.Breakpoints;
+using AspNetCoreDebuggerMcp.Inspection;
 
 namespace AspNetCoreDebuggerMcp.Debugging;
 
-/// Combined result of a wait-for-stop call: the stop event and the current session snapshot.
-public sealed record WaitResult(StopInfo Stop, SessionSnapshot Session);
+/// Combined result of a wait-for-stop call: the stop event, the current session snapshot,
+/// and auto-context (top frame + source snippet) when the stopped thread is known.
+public sealed record WaitResult(
+    StopInfo Stop,
+    SessionSnapshot Session,
+    StackFrame? TopFrame,
+    SourceSnippet? Snippet);
 
 /// Holds the single active debug session. Session-lifecycle calls (launch/attach/disconnect)
 /// are serialised under a semaphore so concurrent tool invocations cannot race. Within a session,
@@ -89,7 +95,69 @@ public sealed class DebugSessionManager : IAsyncDisposable
     {
         var s = RequireActiveSession();
         var stop = await s.WaitForStopAsync(timeout, ct).ConfigureAwait(false);
-        return new WaitResult(stop, s.Snapshot());
+
+        // Auto-context-on-stop: best-effort top frame + source snippet for the stopped thread.
+        StackFrame? topFrame = null;
+        SourceSnippet? snippet = null;
+        if (stop.ThreadId is int tid)
+        {
+            try { topFrame = await s.GetTopFrameAsync(tid, ct).ConfigureAwait(false); }
+            catch { /* best-effort; auto-context is opportunistic */ }
+
+            if (topFrame is { SourcePath: { } path, Line: int line })
+                snippet = InspectionService.TryReadSnippet(path, line);
+        }
+
+        return new WaitResult(stop, s.Snapshot(), topFrame, snippet);
+    }
+
+    // ---- inspection passthroughs ---------------------------------------------------
+
+    public Task<IReadOnlyList<ThreadInfo>> ListThreadsAsync(CancellationToken ct)
+        => RequireActiveSession().ListThreadsAsync(ct);
+
+    public Task<IReadOnlyList<StackFrame>> GetStackTraceAsync(
+        int? threadId, int? startFrame, int? levels, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        return s.GetStackTraceAsync(ResolveThreadIdOrThrow(threadId), startFrame, levels, ct);
+    }
+
+    public async Task<IReadOnlyList<ScopeWithVariables>> GetScopesAsync(
+        int? frameId, int depth, int maxChildren, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        int fid = frameId ?? await ResolveTopFrameIdAsync(s, ct).ConfigureAwait(false);
+        return await s.GetScopesAsync(fid, depth, maxChildren, ct).ConfigureAwait(false);
+    }
+
+    public Task<EvaluateResult> EvaluateAsync(string expression, int? frameId, CancellationToken ct)
+        => RequireActiveSession().EvaluateAsync(expression, frameId, ct);
+
+    public Task<EvaluateResult> SetExpressionAsync(
+        string expression, string value, int? frameId, CancellationToken ct)
+        => RequireActiveSession().SetExpressionAsync(expression, value, frameId, ct);
+
+    public Task<ExceptionAutopsy> AutopsyAsync(int? threadId, int topFrameCount, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        return s.AutopsyAsync(ResolveThreadIdOrThrow(threadId), topFrameCount, ct);
+    }
+
+    private int ResolveThreadIdOrThrow(int? threadId)
+    {
+        if (threadId is int id) return id;
+        if (_session?.LastStop?.ThreadId is int t) return t;
+        throw new DebugException("No current thread known. Pass threadId explicitly, or wait for a stop first.");
+    }
+
+    private static async Task<int> ResolveTopFrameIdAsync(DebugSession s, CancellationToken ct)
+    {
+        if (s.LastStop?.ThreadId is not int tid)
+            throw new DebugException("No current thread known. Pass frameId explicitly, or wait for a stop first.");
+        var top = await s.GetTopFrameAsync(tid, ct).ConfigureAwait(false)
+            ?? throw new DebugException("Could not determine the top frame.");
+        return top.Id;
     }
 
     // ---- breakpoints ----------------------------------------------------------------

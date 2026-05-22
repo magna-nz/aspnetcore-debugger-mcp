@@ -57,7 +57,7 @@ public sealed class ExecutionTools
     }
 
     [McpServerTool(Name = "breakpoint_wait")]
-    [Description("Block until the debuggee hits a breakpoint, completes a step, or otherwise stops. Returns the stop info.")]
+    [Description("Block until the debuggee hits a breakpoint, completes a step, or otherwise stops. Returns the stop info plus auto-context: the topmost stack frame and a source snippet around the stop.")]
     public async Task<string> WaitAsync(
         [Description("Maximum seconds to wait. Defaults to 30.")] int? timeoutSeconds = null,
         CancellationToken ct = default)
@@ -72,6 +72,8 @@ public sealed class ExecutionTools
                 stop = result.Stop,
                 state = result.Session.State,
                 processId = result.Session.ProcessId,
+                topFrame = result.TopFrame,
+                snippet = result.Snippet,
             });
         }
         catch (OperationCanceledException)

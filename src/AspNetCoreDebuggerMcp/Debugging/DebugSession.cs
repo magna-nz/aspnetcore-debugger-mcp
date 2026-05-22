@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AspNetCoreDebuggerMcp.Breakpoints;
 using AspNetCoreDebuggerMcp.Dap;
+using AspNetCoreDebuggerMcp.Inspection;
 
 namespace AspNetCoreDebuggerMcp.Debugging;
 
@@ -14,6 +15,7 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly SessionStateMachine _stateMachine = new();
     private readonly StopWaiter _stopWaiter = new();
     private readonly BreakpointRegistry _breakpoints = new();
+    private readonly InspectionService _inspector;
     private readonly TaskCompletionSource _initializedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
@@ -31,8 +33,35 @@ internal sealed class DebugSession : IAsyncDisposable
     {
         _process = process;
         _client = client;
+        _inspector = new InspectionService(client);
         _client.EventReceived += OnDapEvent;
     }
+
+    // ---- inspection (delegated to InspectionService) ---------------------------------
+
+    public Task<IReadOnlyList<ThreadInfo>> ListThreadsAsync(CancellationToken ct)
+        => _inspector.ListThreadsAsync(ct);
+
+    public Task<IReadOnlyList<StackFrame>> GetStackTraceAsync(
+        int threadId, int? startFrame, int? levels, CancellationToken ct)
+        => _inspector.GetStackTraceAsync(threadId, startFrame, levels, ct);
+
+    public Task<StackFrame?> GetTopFrameAsync(int threadId, CancellationToken ct)
+        => _inspector.GetTopFrameAsync(threadId, ct);
+
+    public Task<IReadOnlyList<ScopeWithVariables>> GetScopesAsync(
+        int frameId, int depth, int maxChildren, CancellationToken ct)
+        => _inspector.GetScopesAsync(frameId, depth, maxChildren, ct);
+
+    public Task<EvaluateResult> EvaluateAsync(string expression, int? frameId, CancellationToken ct)
+        => _inspector.EvaluateAsync(expression, frameId, ct);
+
+    public Task<EvaluateResult> SetExpressionAsync(
+        string expression, string value, int? frameId, CancellationToken ct)
+        => _inspector.SetExpressionAsync(expression, value, frameId, ct);
+
+    public Task<ExceptionAutopsy> AutopsyAsync(int threadId, int topFrameCount, CancellationToken ct)
+        => _inspector.AutopsyAsync(threadId, topFrameCount, ct);
 
     // ---- session lifecycle ----------------------------------------------------------
 
