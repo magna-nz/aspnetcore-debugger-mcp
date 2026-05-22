@@ -1,45 +1,53 @@
+using AspNetCoreDebuggerMcp.Breakpoints;
+
 namespace AspNetCoreDebuggerMcp.Debugging;
 
-/// Holds the single active debug session. Serializes all session-lifecycle calls
-/// (launch/attach/disconnect) so concurrent tool invocations cannot race.
+/// Combined result of a wait-for-stop call: the stop event and the current session snapshot.
+public sealed record WaitResult(StopInfo Stop, SessionSnapshot Session);
+
+/// Holds the single active debug session. Session-lifecycle calls (launch/attach/disconnect)
+/// are serialised under a semaphore so concurrent tool invocations cannot race. Within a session,
+/// execution and breakpoint calls pass through directly — the session's own state is thread-safe.
 public sealed class DebugSessionManager : IAsyncDisposable
 {
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private DebugSession? _session;
+
+    // ---- session lifecycle ----------------------------------------------------------
 
     public async Task<SessionSnapshot> LaunchAsync(
         string program, string[]? args, string? cwd, bool stopAtEntry, CancellationToken ct)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        await _lifecycleGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             EnsureNoActiveSession();
-            await DisposeTerminatedAsync().ConfigureAwait(false);
+            await DisposeExistingAsync().ConfigureAwait(false);
             var path = NetcoredbgLocator.Locate();
             _session = await DebugSession.LaunchAsync(path, program, args, cwd, stopAtEntry, ct)
                 .ConfigureAwait(false);
             return _session.Snapshot();
         }
-        finally { _gate.Release(); }
+        finally { _lifecycleGate.Release(); }
     }
 
     public async Task<SessionSnapshot> AttachAsync(int processId, CancellationToken ct)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        await _lifecycleGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             EnsureNoActiveSession();
-            await DisposeTerminatedAsync().ConfigureAwait(false);
+            await DisposeExistingAsync().ConfigureAwait(false);
             var path = NetcoredbgLocator.Locate();
             _session = await DebugSession.AttachAsync(path, processId, ct).ConfigureAwait(false);
             return _session.Snapshot();
         }
-        finally { _gate.Release(); }
+        finally { _lifecycleGate.Release(); }
     }
 
     public async Task<SessionSnapshot> DisconnectAsync(CancellationToken ct)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        await _lifecycleGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_session is null) return SessionSnapshot.None;
@@ -48,11 +56,76 @@ public sealed class DebugSessionManager : IAsyncDisposable
             _session = null;
             return SessionSnapshot.None;
         }
-        finally { _gate.Release(); }
+        finally { _lifecycleGate.Release(); }
     }
 
     public SessionSnapshot GetState()
         => _session is null ? SessionSnapshot.None : _session.Snapshot();
+
+    // ---- execution control ----------------------------------------------------------
+
+    public async Task<SessionSnapshot> ContinueAsync(int? threadId, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        await s.ContinueAsync(threadId, ct).ConfigureAwait(false);
+        return s.Snapshot();
+    }
+
+    public async Task<SessionSnapshot> PauseAsync(int? threadId, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        await s.PauseAsync(threadId, ct).ConfigureAwait(false);
+        return s.Snapshot();
+    }
+
+    public async Task<SessionSnapshot> StepAsync(string kind, int? threadId, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        await s.StepAsync(kind, threadId, ct).ConfigureAwait(false);
+        return s.Snapshot();
+    }
+
+    public async Task<WaitResult> WaitForStopAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        var stop = await s.WaitForStopAsync(timeout, ct).ConfigureAwait(false);
+        return new WaitResult(stop, s.Snapshot());
+    }
+
+    // ---- breakpoints ----------------------------------------------------------------
+
+    public Task<LineBreakpoint> AddLineBreakpointAsync(
+        string sourcePath, int line, string? condition, string? hitCondition, string? logMessage,
+        CancellationToken ct)
+        => RequireActiveSession().AddLineBreakpointAsync(sourcePath, line, condition, hitCondition, logMessage, ct);
+
+    public Task<FunctionBreakpoint> AddFunctionBreakpointAsync(
+        string functionName, string? condition, string? hitCondition, CancellationToken ct)
+        => RequireActiveSession().AddFunctionBreakpointAsync(functionName, condition, hitCondition, ct);
+
+    public Task<bool> RemoveBreakpointAsync(string id, CancellationToken ct)
+        => RequireActiveSession().RemoveBreakpointAsync(id, ct);
+
+    public Task SetExceptionFiltersAsync(IEnumerable<string> filters, CancellationToken ct)
+        => RequireActiveSession().SetExceptionFiltersAsync(filters, ct);
+
+    public BreakpointsSnapshot ListBreakpoints()
+        => _session is null
+            ? new BreakpointsSnapshot(
+                Array.Empty<LineBreakpoint>(),
+                Array.Empty<FunctionBreakpoint>(),
+                Array.Empty<string>())
+            : _session.BreakpointsSnapshot();
+
+    // ---- helpers --------------------------------------------------------------------
+
+    private DebugSession RequireActiveSession()
+    {
+        if (_session is null || _session.State == SessionState.Terminated)
+            throw new DebugException(
+                "No active debug session. Call debug_launch or debug_attach first.");
+        return _session;
+    }
 
     private void EnsureNoActiveSession()
     {
@@ -61,7 +134,7 @@ public sealed class DebugSessionManager : IAsyncDisposable
                 "A debug session is already active. Call debug_disconnect before starting a new one.");
     }
 
-    private async Task DisposeTerminatedAsync()
+    private async Task DisposeExistingAsync()
     {
         if (_session is null) return;
         try { await _session.DisposeAsync().ConfigureAwait(false); } catch { }
@@ -75,6 +148,6 @@ public sealed class DebugSessionManager : IAsyncDisposable
             try { await _session.DisposeAsync().ConfigureAwait(false); } catch { }
             _session = null;
         }
-        _gate.Dispose();
+        _lifecycleGate.Dispose();
     }
 }

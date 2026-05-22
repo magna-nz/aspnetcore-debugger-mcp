@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AspNetCoreDebuggerMcp.Dap;
 
@@ -7,6 +8,12 @@ namespace AspNetCoreDebuggerMcp.Dap;
 /// correlates responses to requests by `seq`, and dispatches events to subscribers.
 internal sealed class DapClient : IAsyncDisposable
 {
+    // netcoredbg's DAP parser rejects null values where a string is expected; omit them.
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private readonly Stream _input;
     private readonly Stream _output;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -41,7 +48,7 @@ internal sealed class DapClient : IAsyncDisposable
         };
         if (arguments is not null) envelope["arguments"] = arguments;
 
-        var json = JsonSerializer.Serialize(envelope);
+        var json = JsonSerializer.Serialize(envelope, JsonOpts);
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {

@@ -1,15 +1,19 @@
 using System.Text.Json;
+using AspNetCoreDebuggerMcp.Breakpoints;
 using AspNetCoreDebuggerMcp.Dap;
 
 namespace AspNetCoreDebuggerMcp.Debugging;
 
 /// One active debug session: owns the netcoredbg process and the DAP client,
-/// runs the launch/attach handshake, and translates DAP events into state transitions.
+/// runs the launch/attach handshake, manages breakpoints, drives execution control,
+/// and translates DAP events into state transitions.
 internal sealed class DebugSession : IAsyncDisposable
 {
     private readonly NetcoredbgProcess _process;
     private readonly DapClient _client;
     private readonly SessionStateMachine _stateMachine = new();
+    private readonly StopWaiter _stopWaiter = new();
+    private readonly BreakpointRegistry _breakpoints = new();
     private readonly TaskCompletionSource _initializedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
@@ -21,6 +25,7 @@ internal sealed class DebugSession : IAsyncDisposable
     public StopInfo? LastStop { get { lock (_gate) return _lastStop; } }
 
     public SessionSnapshot Snapshot() => new(State.ToString(), ProcessId, LastStop);
+    public BreakpointsSnapshot BreakpointsSnapshot() => _breakpoints.Snapshot();
 
     private DebugSession(NetcoredbgProcess process, DapClient client)
     {
@@ -29,12 +34,10 @@ internal sealed class DebugSession : IAsyncDisposable
         _client.EventReceived += OnDapEvent;
     }
 
+    // ---- session lifecycle ----------------------------------------------------------
+
     public static async Task<DebugSession> LaunchAsync(
-        string netcoredbgPath,
-        string program,
-        string[]? args,
-        string? cwd,
-        bool stopAtEntry,
+        string netcoredbgPath, string program, string[]? args, string? cwd, bool stopAtEntry,
         CancellationToken ct)
     {
         var session = StartAdapter(netcoredbgPath);
@@ -42,8 +45,7 @@ internal sealed class DebugSession : IAsyncDisposable
         {
             await session.HandshakeAsync(
                 isLaunch: true,
-                startArgs: BuildLaunchArgs(program, args, cwd, stopAtEntry),
-                ct).ConfigureAwait(false);
+                startArgs: BuildLaunchArgs(program, args, cwd, stopAtEntry), ct).ConfigureAwait(false);
             return session;
         }
         catch
@@ -54,17 +56,15 @@ internal sealed class DebugSession : IAsyncDisposable
     }
 
     public static async Task<DebugSession> AttachAsync(
-        string netcoredbgPath,
-        int processId,
-        CancellationToken ct)
+        string netcoredbgPath, int processId, CancellationToken ct)
     {
         var session = StartAdapter(netcoredbgPath);
         try
         {
             await session.HandshakeAsync(
                 isLaunch: false,
-                startArgs: new Dictionary<string, object?> { ["processId"] = processId },
-                ct).ConfigureAwait(false);
+                startArgs: new Dictionary<string, object?> { ["processId"] = processId }, ct)
+                .ConfigureAwait(false);
             return session;
         }
         catch
@@ -110,7 +110,6 @@ internal sealed class DebugSession : IAsyncDisposable
         if (!initialize.Success)
             throw new DebugException($"initialize failed: {initialize.Message ?? "unknown"}");
 
-        // Send launch/attach now; its response may not arrive until after configurationDone.
         var startTask = _client.SendRequestAsync(isLaunch ? "launch" : "attach", startArgs, ct);
 
         await _initializedTcs.Task.WaitAsync(ct).ConfigureAwait(false);
@@ -139,10 +138,177 @@ internal sealed class DebugSession : IAsyncDisposable
         }
         catch
         {
-            // Adapter may already be down — best-effort.
+            // adapter may already be down; best-effort
         }
         _stateMachine.OnTerminated();
+        _stopWaiter.Terminate();
     }
+
+    // ---- execution control ----------------------------------------------------------
+
+    public async Task ContinueAsync(int? threadId, CancellationToken ct)
+    {
+        var tid = ResolveThreadId(threadId);
+        _stopWaiter.Reset();
+        var resp = await _client.SendRequestAsync("continue",
+            new Dictionary<string, object?> { ["threadId"] = tid }, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"continue failed: {resp.Message ?? "unknown"}");
+    }
+
+    public async Task PauseAsync(int? threadId, CancellationToken ct)
+    {
+        var tid = ResolveThreadId(threadId);
+        var resp = await _client.SendRequestAsync("pause",
+            new Dictionary<string, object?> { ["threadId"] = tid }, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"pause failed: {resp.Message ?? "unknown"}");
+    }
+
+    public async Task StepAsync(string kind, int? threadId, CancellationToken ct)
+    {
+        var dapCommand = kind switch
+        {
+            "in"   => "stepIn",
+            "over" => "next",
+            "out"  => "stepOut",
+            _ => throw new DebugException($"Unknown step kind '{kind}'. Use one of: in, over, out."),
+        };
+        var tid = ResolveThreadId(threadId);
+        _stopWaiter.Reset();
+        var resp = await _client.SendRequestAsync(dapCommand,
+            new Dictionary<string, object?> { ["threadId"] = tid }, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"{dapCommand} failed: {resp.Message ?? "unknown"}");
+    }
+
+    public async Task<StopInfo> WaitForStopAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(timeout);
+        return await _stopWaiter.WaitAsync(linked.Token).ConfigureAwait(false);
+    }
+
+    private int ResolveThreadId(int? threadId)
+    {
+        if (threadId is int id) return id;
+        var stop = LastStop;
+        if (stop?.ThreadId is int known) return known;
+        throw new DebugException(
+            "No current thread known. Pass threadId explicitly, or hit a breakpoint first.");
+    }
+
+    // ---- breakpoints ----------------------------------------------------------------
+
+    public async Task<LineBreakpoint> AddLineBreakpointAsync(
+        string sourcePath, int line, string? condition, string? hitCondition, string? logMessage,
+        CancellationToken ct)
+    {
+        var bp = _breakpoints.AddLine(sourcePath, line, condition, hitCondition, logMessage);
+        await SyncSourceAsync(sourcePath, ct).ConfigureAwait(false);
+        return _breakpoints.ForSource(sourcePath).First(b => b.Id == bp.Id);
+    }
+
+    public async Task<FunctionBreakpoint> AddFunctionBreakpointAsync(
+        string functionName, string? condition, string? hitCondition, CancellationToken ct)
+    {
+        var bp = _breakpoints.AddFunction(functionName, condition, hitCondition);
+        await SyncFunctionsAsync(ct).ConfigureAwait(false);
+        return _breakpoints.AllFunction().First(f => f.Id == bp.Id);
+    }
+
+    public async Task<bool> RemoveBreakpointAsync(string id, CancellationToken ct)
+    {
+        var sourcePath = _breakpoints.GetSourcePathOf(id);
+        var kind = _breakpoints.Remove(id);
+        switch (kind)
+        {
+            case BreakpointKind.Line when sourcePath is not null:
+                await SyncSourceAsync(sourcePath, ct).ConfigureAwait(false);
+                return true;
+            case BreakpointKind.Function:
+                await SyncFunctionsAsync(ct).ConfigureAwait(false);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public async Task SetExceptionFiltersAsync(IEnumerable<string> filters, CancellationToken ct)
+    {
+        _breakpoints.SetExceptionFilters(filters);
+        var current = _breakpoints.Snapshot().ExceptionFilters.ToArray();
+        var resp = await _client.SendRequestAsync("setExceptionBreakpoints",
+            new { filters = current }, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"setExceptionBreakpoints failed: {resp.Message ?? "unknown"}");
+    }
+
+    private async Task SyncSourceAsync(string sourcePath, CancellationToken ct)
+    {
+        var bps = _breakpoints.ForSource(sourcePath);
+        var args = new
+        {
+            source = new { path = sourcePath, name = Path.GetFileName(sourcePath) },
+            breakpoints = bps.Select(b => new
+            {
+                line = b.Line,
+                condition = b.Condition,
+                hitCondition = b.HitCondition,
+                logMessage = b.LogMessage,
+            }).ToArray(),
+            lines = bps.Select(b => b.Line).ToArray(),
+        };
+        var resp = await _client.SendRequestAsync("setBreakpoints", args, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"setBreakpoints failed: {resp.Message ?? "unknown"}");
+
+        ApplySetBreakpointsResponse(resp, bps, isLine: true);
+    }
+
+    private async Task SyncFunctionsAsync(CancellationToken ct)
+    {
+        var fns = _breakpoints.AllFunction();
+        var args = new
+        {
+            breakpoints = fns.Select(f => new
+            {
+                name = f.FunctionName,
+                condition = f.Condition,
+                hitCondition = f.HitCondition,
+            }).ToArray(),
+        };
+        var resp = await _client.SendRequestAsync("setFunctionBreakpoints", args, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"setFunctionBreakpoints failed: {resp.Message ?? "unknown"}");
+
+        ApplySetBreakpointsResponse(resp, fns, isLine: false);
+    }
+
+    private void ApplySetBreakpointsResponse<T>(DapMessage resp, IReadOnlyList<T> registryBps, bool isLine)
+    {
+        if (resp.Body is not { } body) return;
+        if (!body.TryGetProperty("breakpoints", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+
+        int i = 0;
+        foreach (var elem in arr.EnumerateArray())
+        {
+            if (i >= registryBps.Count) break;
+            var verified = elem.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True;
+            int? adapterId =
+                elem.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number
+                    ? idEl.GetInt32() : null;
+
+            if (isLine && registryBps[i] is LineBreakpoint lb)
+                _breakpoints.UpdateLine(lb.Id, verified, adapterId);
+            else if (!isLine && registryBps[i] is FunctionBreakpoint fb)
+                _breakpoints.UpdateFunction(fb.Id, verified, adapterId);
+
+            i++;
+        }
+    }
+
+    // ---- DAP event handling ---------------------------------------------------------
 
     private void OnDapEvent(DapMessage e)
     {
@@ -151,23 +317,32 @@ internal sealed class DebugSession : IAsyncDisposable
             case "initialized":
                 _initializedTcs.TrySetResult();
                 break;
+
             case "stopped":
                 HandleStopped(e);
                 break;
+
             case "continued":
                 _stateMachine.OnContinued();
                 break;
+
             case "process":
-                if (e.Body is { } body
-                    && body.TryGetProperty("systemProcessId", out var pid)
+                if (e.Body is { } p
+                    && p.TryGetProperty("systemProcessId", out var pid)
                     && pid.ValueKind == JsonValueKind.Number)
                 {
                     lock (_gate) _processId = pid.GetInt32();
                 }
                 break;
+
+            case "breakpoint":
+                HandleBreakpointEvent(e);
+                break;
+
             case "terminated":
             case "exited":
                 _stateMachine.OnTerminated();
+                _stopWaiter.Terminate();
                 break;
         }
     }
@@ -186,13 +361,27 @@ internal sealed class DebugSession : IAsyncDisposable
             if (body.TryGetProperty("description", out var d) && d.ValueKind == JsonValueKind.String)
                 description = d.GetString();
         }
-        lock (_gate) _lastStop = new StopInfo(reason, threadId, description);
+        var info = new StopInfo(reason, threadId, description);
+        lock (_gate) _lastStop = info;
         _stateMachine.OnStopped();
+        _stopWaiter.SetStop(info);
+    }
+
+    private void HandleBreakpointEvent(DapMessage e)
+    {
+        if (e.Body is not { } body) return;
+        if (!body.TryGetProperty("breakpoint", out var bp)) return;
+        if (!bp.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.Number) return;
+
+        var adapterId = idEl.GetInt32();
+        var verified = bp.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True;
+        _breakpoints.UpdateLineByAdapterId(adapterId, verified);
     }
 
     public async ValueTask DisposeAsync()
     {
         _client.EventReceived -= OnDapEvent;
+        _stopWaiter.Terminate();
         await _client.DisposeAsync().ConfigureAwait(false);
         await _process.DisposeAsync().ConfigureAwait(false);
     }

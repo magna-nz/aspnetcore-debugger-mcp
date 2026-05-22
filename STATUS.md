@@ -9,6 +9,11 @@
   request/response correlation + event dispatch). netcoredbg process lifecycle. Session state
   machine + handshake. Four MCP tools (debug_launch / _attach / _disconnect / _state). 14 unit
   tests passing. End-to-end smoke test passes against the real netcoredbg + a real test .NET app.
+- WAVE 2 COMPLETE: breakpoints + execution control. BreakpointRegistry (intent-tracking, used to
+  re-send the full per-source set on every mutation). StopWaiter (TCS waiter with Reset/Terminate
+  semantics for breakpoint_wait). 9 new MCP tools: breakpoint_set / _set_function / _remove /
+  _list / _set_exception, debug_continue / _pause / _step, breakpoint_wait. 27 unit tests passing.
+  End-to-end Wave 2 smoke passes: set BP, continue, hit BP, step over, remove, continue to exit.
 
 ## Decisions made
 - **Approach:** MCP server that wraps `netcoredbg` (MIT) over the Debug Adapter Protocol — chosen
@@ -21,14 +26,13 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- Wave 1 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
-- Smoke test: launch TestApp.dll with stopAtEntry → state Running → async entry-stop → state Paused
-  with lastStop reason=entry → disconnect clean. The whole MCP → DAP → ICorDebug chain works.
-- Awaiting user "go" for Wave 2 (breakpoints + execution control).
+- Wave 2 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
+- 13 MCP tools live, all unit + smoke tests green. Awaiting user "go" for Wave 3.
 
 ## What's next
-1. Wave 2 (needs user "go"): breakpoint_set/_function/_remove/_list/_set_exception,
-   debug_continue/pause/step, breakpoint_wait.
+1. Wave 3 (needs user "go" — MVP completes here): threads_list, stacktrace_get, variables_get
+   (recursive expansion + collection summarisation), evaluate, variables_set, exception_autopsy,
+   auto-context-on-stop.
 2. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
    bundling is sorted (Wave 5).
 
@@ -44,3 +48,8 @@
   client must track `breakpoint` events, not just the `setBreakpoints` response.
 - DAP launch flow confirmed: initialize → (response) → launch → `initialized` event →
   setBreakpoints → configurationDone → process runs → `stopped` event.
+- DAP client serialises requests with `WhenWritingNull` — netcoredbg's parser rejects null
+  string fields (breakpoint condition / hitCondition / logMessage). Required for setBreakpoints.
+- StopWaiter is Reset() synchronously inside ContinueAsync/StepAsync (before the DAP request is
+  sent) so a wait registered immediately after sees a fresh TCS. Resetting on the `continued`
+  event instead would race the agent.
