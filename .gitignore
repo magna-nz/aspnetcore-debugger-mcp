@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+out/
+
+# .NET
+*.user
+*.suo
+project.lock.json
+artifacts/
+
+# Tooling / IDE
+.vs/
+.vscode/
+.idea/
+
+# netcoredbg native build (vendored binary handled separately)
+.netcoredbg-build/
+external/netcoredbg/build/
+
+# OS
+.DS_Store
+
+# MCP / local config that may contain tokens
+.mcp.json
+*.local.json
