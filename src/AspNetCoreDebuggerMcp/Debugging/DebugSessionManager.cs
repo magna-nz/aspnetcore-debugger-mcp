@@ -1,4 +1,5 @@
 using AspNetCoreDebuggerMcp.Breakpoints;
+using AspNetCoreDebuggerMcp.Diagnostics;
 using AspNetCoreDebuggerMcp.Inspection;
 
 namespace AspNetCoreDebuggerMcp.Debugging;
@@ -144,6 +145,16 @@ public sealed class DebugSessionManager : IAsyncDisposable
         return s.AutopsyAsync(ResolveThreadIdOrThrow(threadId), topFrameCount, ct);
     }
 
+    public Task<DataBreakpoint> AddDataBreakpointAsync(
+        int variablesReference, string name, string accessType, CancellationToken ct)
+        => RequireActiveSession().AddDataBreakpointAsync(variablesReference, name, accessType, ct);
+
+    public Task<HangAnalysis> HangAnalyzeAsync(int topFramesPerThread, CancellationToken ct)
+        => RequireActiveSession().HangAnalyzeAsync(topFramesPerThread, ct);
+
+    public IReadOnlyList<OutputLine> DrainOutput(string? category, int? maxLines)
+        => _session?.DrainOutput(category, maxLines) ?? Array.Empty<OutputLine>();
+
     private int ResolveThreadIdOrThrow(int? threadId)
     {
         if (threadId is int id) return id;
@@ -182,6 +193,7 @@ public sealed class DebugSessionManager : IAsyncDisposable
             ? new BreakpointsSnapshot(
                 Array.Empty<LineBreakpoint>(),
                 Array.Empty<FunctionBreakpoint>(),
+                Array.Empty<DataBreakpoint>(),
                 Array.Empty<string>())
             : _session.BreakpointsSnapshot();
 

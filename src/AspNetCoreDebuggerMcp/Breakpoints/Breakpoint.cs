@@ -18,7 +18,16 @@ public sealed record FunctionBreakpoint(
     bool Verified,
     int? AdapterId);
 
+public sealed record DataBreakpoint(
+    string Id,
+    string DataId,          // DAP-issued opaque token from dataBreakpointInfo
+    string Description,     // human-readable, from the probe
+    string AccessType,      // "read" | "write" | "readWrite"
+    bool Verified,
+    int? AdapterId);
+
 public sealed record BreakpointsSnapshot(
     IReadOnlyList<LineBreakpoint> Line,
     IReadOnlyList<FunctionBreakpoint> Function,
+    IReadOnlyList<DataBreakpoint> Data,
     IReadOnlyList<string> ExceptionFilters);

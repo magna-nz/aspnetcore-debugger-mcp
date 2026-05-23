@@ -8,6 +8,7 @@ internal sealed class BreakpointRegistry
     private readonly object _gate = new();
     private readonly List<LineBreakpoint> _line = new();
     private readonly List<FunctionBreakpoint> _function = new();
+    private readonly List<DataBreakpoint> _data = new();
     private readonly HashSet<string> _exceptionFilters = new(StringComparer.OrdinalIgnoreCase);
 
     public LineBreakpoint AddLine(
@@ -34,7 +35,7 @@ internal sealed class BreakpointRegistry
     }
 
     /// Removes the breakpoint with the given id from any list it lives in.
-    /// Returns the kind removed (line / function) or null if not found.
+    /// Returns the kind removed (line / function / data) or null if not found.
     public BreakpointKind? Remove(string id)
     {
         lock (_gate)
@@ -43,7 +44,36 @@ internal sealed class BreakpointRegistry
             if (i >= 0) { _line.RemoveAt(i); return BreakpointKind.Line; }
             int j = _function.FindIndex(b => b.Id == id);
             if (j >= 0) { _function.RemoveAt(j); return BreakpointKind.Function; }
+            int k = _data.FindIndex(b => b.Id == id);
+            if (k >= 0) { _data.RemoveAt(k); return BreakpointKind.Data; }
             return null;
+        }
+    }
+
+    public DataBreakpoint AddData(string dataId, string description, string accessType)
+    {
+        var bp = new DataBreakpoint(
+            Id: NewId("dbp"),
+            DataId: dataId,
+            Description: description,
+            AccessType: accessType,
+            Verified: false,
+            AdapterId: null);
+        lock (_gate) _data.Add(bp);
+        return bp;
+    }
+
+    public IReadOnlyList<DataBreakpoint> AllData()
+    {
+        lock (_gate) return _data.ToList();
+    }
+
+    public void UpdateData(string id, bool verified, int? adapterId)
+    {
+        lock (_gate)
+        {
+            int i = _data.FindIndex(b => b.Id == id);
+            if (i >= 0) _data[i] = _data[i] with { Verified = verified, AdapterId = adapterId };
         }
     }
 
@@ -116,6 +146,7 @@ internal sealed class BreakpointRegistry
             return new BreakpointsSnapshot(
                 _line.ToList(),
                 _function.ToList(),
+                _data.ToList(),
                 _exceptionFilters.ToList());
     }
 
@@ -123,4 +154,4 @@ internal sealed class BreakpointRegistry
         => $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 1 + 8)];
 }
 
-internal enum BreakpointKind { Line, Function }
+internal enum BreakpointKind { Line, Function, Data }

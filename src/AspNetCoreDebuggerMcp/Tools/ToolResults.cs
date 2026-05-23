@@ -10,6 +10,7 @@ internal static class ToolResults
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, Json);

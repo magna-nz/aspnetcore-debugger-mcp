@@ -23,6 +23,16 @@
   evaluate, variables_set, exception_autopsy. 30 unit tests passing. End-to-end Wave 3 smoke
   validates the whole MVP loop including variables_set actually mutating runtime state
   (set x=100, evaluate confirms 100) and exception_autopsy capturing a real NRE.
+- WAVE 4 COMPLETE: differentiators. ThreadAnalyzer (pure classifier) + hang_analyze composite
+  that auto-pauses if running, lists threads, fetches top frames, classifies each thread's
+  blocking pattern (Monitor / WaitHandle / Semaphore / Task / Thread.Join / Sleep / async).
+  DAP `output` events buffered per session; process_read_output drains them. Data breakpoints
+  wired (registry + setDataBreakpoints), but **netcoredbg returns E_NOTIMPL (0x80004001) for
+  dataBreakpointInfo** — the tool exists and surfaces the adapter limitation cleanly; an
+  adapter that supports it would just work. 3 new MCP tools (22 total): hang_analyze,
+  breakpoint_set_data, process_read_output. 44 unit tests passing. End-to-end Wave 4 smoke
+  validates hang_analyze classifying threads and process_read_output capturing "Sum: 30".
+  Enum responses now serialize as camelCase strings (e.g. "blockedOnMonitor"), not ints.
 
 ## Decisions made
 - **Approach:** MCP server that wraps `netcoredbg` (MIT) over the Debug Adapter Protocol — chosen
@@ -35,12 +45,13 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- Wave 3 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
-- 19 MCP tools live, MVP functionally complete. Awaiting user "go" for Wave 4.
+- Wave 4 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
+- 22 MCP tools live. Awaiting user "go" for Wave 5 (final).
 
 ## What's next
-1. Wave 4 (needs user "go"): hang/deadlock analyzer, data/watch breakpoints, process stdin/stdout I/O.
-2. Wave 5: package as a .NET tool, netcoredbg bundling, README, macOS setup, CI.
+1. Wave 5 (needs user "go" — last wave): package as a .NET tool, netcoredbg bundling decision,
+   README, macOS setup guide, CI.
+2. After Wave 5: raise the PR.
 3. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
    bundling is sorted (Wave 5).
 
@@ -61,3 +72,9 @@
 - StopWaiter is Reset() synchronously inside ContinueAsync/StepAsync (before the DAP request is
   sent) so a wait registered immediately after sees a fresh TCS. Resetting on the `continued`
   event instead would race the agent.
+- netcoredbg lacks data breakpoint support (dataBreakpointInfo → E_NOTIMPL). The
+  breakpoint_set_data tool exists and works in principle; users get a clear "adapter doesn't
+  support this" error message.
+- process_write_input is NOT implemented in Wave 4. DAP launch mode owns the debuggee's stdin
+  (netcoredbg launched it); we'd need a different launch architecture (we launch the process
+  ourselves and have netcoredbg attach) to plumb stdin. Deferred — flag for a future wave.

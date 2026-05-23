@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using AspNetCoreDebuggerMcp.Breakpoints;
 using AspNetCoreDebuggerMcp.Dap;
+using AspNetCoreDebuggerMcp.Diagnostics;
 using AspNetCoreDebuggerMcp.Inspection;
 
 namespace AspNetCoreDebuggerMcp.Debugging;
@@ -16,6 +18,7 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly StopWaiter _stopWaiter = new();
     private readonly BreakpointRegistry _breakpoints = new();
     private readonly InspectionService _inspector;
+    private readonly ConcurrentQueue<OutputLine> _outputBuffer = new();
     private readonly TaskCompletionSource _initializedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
@@ -258,9 +261,121 @@ internal sealed class DebugSession : IAsyncDisposable
             case BreakpointKind.Function:
                 await SyncFunctionsAsync(ct).ConfigureAwait(false);
                 return true;
+            case BreakpointKind.Data:
+                await SyncDataBreakpointsAsync(ct).ConfigureAwait(false);
+                return true;
             default:
                 return false;
         }
+    }
+
+    public async Task<DataBreakpoint> AddDataBreakpointAsync(
+        int variablesReference, string name, string accessType, CancellationToken ct)
+    {
+        var probe = await _client.SendRequestAsync("dataBreakpointInfo",
+            new { variablesReference, name }, ct).ConfigureAwait(false);
+        if (!probe.Success)
+            throw new DebugException($"dataBreakpointInfo failed: {probe.Message ?? "unknown"}");
+
+        string? dataId = null;
+        string? description = name;
+        if (probe.Body is { } body)
+        {
+            if (body.TryGetProperty("dataId", out var didEl) && didEl.ValueKind == JsonValueKind.String)
+                dataId = didEl.GetString();
+            if (body.TryGetProperty("description", out var d) && d.ValueKind == JsonValueKind.String)
+                description = d.GetString();
+        }
+        if (string.IsNullOrEmpty(dataId))
+            throw new DebugException(
+                $"Cannot set a data breakpoint on '{name}': adapter returned no dataId" +
+                (description != name ? $" ({description})" : ""));
+
+        var bp = _breakpoints.AddData(dataId, description ?? name, accessType);
+        await SyncDataBreakpointsAsync(ct).ConfigureAwait(false);
+        return _breakpoints.AllData().First(b => b.Id == bp.Id);
+    }
+
+    private async Task SyncDataBreakpointsAsync(CancellationToken ct)
+    {
+        var data = _breakpoints.AllData();
+        var args = new
+        {
+            breakpoints = data.Select(b => new
+            {
+                dataId = b.DataId,
+                accessType = b.AccessType,
+            }).ToArray(),
+        };
+        var resp = await _client.SendRequestAsync("setDataBreakpoints", args, ct).ConfigureAwait(false);
+        if (!resp.Success)
+            throw new DebugException($"setDataBreakpoints failed: {resp.Message ?? "unknown"}");
+
+        if (resp.Body is { } body && body.TryGetProperty("breakpoints", out var arr)
+            && arr.ValueKind == JsonValueKind.Array)
+        {
+            int i = 0;
+            foreach (var elem in arr.EnumerateArray())
+            {
+                if (i >= data.Count) break;
+                var verified = elem.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True;
+                int? adapterId =
+                    elem.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number
+                        ? idEl.GetInt32() : null;
+                _breakpoints.UpdateData(data[i].Id, verified, adapterId);
+                i++;
+            }
+        }
+    }
+
+    // ---- output buffer + hang analysis ----------------------------------------------
+
+    public IReadOnlyList<OutputLine> DrainOutput(string? category = null, int? maxLines = null)
+    {
+        var collected = new List<OutputLine>();
+        while (_outputBuffer.TryDequeue(out var line))
+        {
+            if (category is null || string.Equals(line.Category, category, StringComparison.OrdinalIgnoreCase))
+                collected.Add(line);
+            if (maxLines is int m && collected.Count >= m) break;
+        }
+        return collected;
+    }
+
+    public async Task<HangAnalysis> HangAnalyzeAsync(int topFramesPerThread, CancellationToken ct)
+    {
+        if (State == SessionState.Running)
+        {
+            // Pause any thread so we can inspect. DAP threads is callable while running.
+            var liveThreads = await ListThreadsAsync(ct).ConfigureAwait(false);
+            if (liveThreads.Count == 0)
+                throw new DebugException("No threads available to pause for hang analysis.");
+            _stopWaiter.Reset();
+            try { await PauseAsync(liveThreads[0].Id, ct).ConfigureAwait(false); }
+            catch (Exception ex) { throw new DebugException($"hang_analyze: pause failed: {ex.Message}", ex); }
+            try
+            {
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                linked.CancelAfter(TimeSpan.FromSeconds(5));
+                await _stopWaiter.WaitAsync(linked.Token).ConfigureAwait(false);
+            }
+            catch { /* may not stop within timeout; analyze what we can */ }
+        }
+
+        var threads = await ListThreadsAsync(ct).ConfigureAwait(false);
+        var infos = new List<ThreadHangInfo>(threads.Count);
+        foreach (var t in threads)
+        {
+            IReadOnlyList<string> names = Array.Empty<string>();
+            try
+            {
+                var frames = await GetStackTraceAsync(t.Id, 0, topFramesPerThread, ct).ConfigureAwait(false);
+                names = frames.Select(f => f.Name).ToList();
+            }
+            catch { /* if a single thread fails, keep going */ }
+            infos.Add(new ThreadHangInfo(t.Id, t.Name, ThreadAnalyzer.Classify(names), names));
+        }
+        return ThreadAnalyzer.Analyze(infos);
     }
 
     public async Task SetExceptionFiltersAsync(IEnumerable<string> filters, CancellationToken ct)
@@ -355,6 +470,10 @@ internal sealed class DebugSession : IAsyncDisposable
                 _stateMachine.OnContinued();
                 break;
 
+            case "output":
+                HandleOutput(e);
+                break;
+
             case "process":
                 if (e.Body is { } p
                     && p.TryGetProperty("systemProcessId", out var pid)
@@ -394,6 +513,17 @@ internal sealed class DebugSession : IAsyncDisposable
         lock (_gate) _lastStop = info;
         _stateMachine.OnStopped();
         _stopWaiter.SetStop(info);
+    }
+
+    private void HandleOutput(DapMessage e)
+    {
+        if (e.Body is not { } body) return;
+        var category = body.TryGetProperty("category", out var c) && c.ValueKind == JsonValueKind.String
+            ? c.GetString() ?? "stdout" : "stdout";
+        var output = body.TryGetProperty("output", out var o) && o.ValueKind == JsonValueKind.String
+            ? o.GetString() ?? "" : "";
+        if (output.Length == 0) return;
+        _outputBuffer.Enqueue(new OutputLine(category, output, DateTimeOffset.UtcNow));
     }
 
     private void HandleBreakpointEvent(DapMessage e)

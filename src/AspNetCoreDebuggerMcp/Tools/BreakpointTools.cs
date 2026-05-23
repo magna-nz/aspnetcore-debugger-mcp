@@ -73,6 +73,7 @@ public sealed class BreakpointTools
                 success = true,
                 line = snap.Line,
                 function = snap.Function,
+                data = snap.Data,
                 exceptionFilters = snap.ExceptionFilters,
             });
         }
@@ -89,6 +90,23 @@ public sealed class BreakpointTools
         {
             await _manager.SetExceptionFiltersAsync(filters ?? Array.Empty<string>(), ct).ConfigureAwait(false);
             return ToolResults.Serialize(new { success = true, exceptionFilters = filters });
+        }
+        catch (Exception ex) { return ToolResults.Err(ex); }
+    }
+
+    [McpServerTool(Name = "breakpoint_set_data")]
+    [Description("Set a data/watch breakpoint: break when a specific variable changes (or is read). Requires a variablesReference + name from variables_get. May not be supported by all adapters.")]
+    public async Task<string> SetDataAsync(
+        [Description("variablesReference of the container holding the variable (from variables_get).")] int variablesReference,
+        [Description("Name of the variable to watch.")] string name,
+        [Description("Access type: \"write\" (default), \"read\", or \"readWrite\".")] string accessType = "write",
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var bp = await _manager.AddDataBreakpointAsync(variablesReference, name, accessType, ct)
+                .ConfigureAwait(false);
+            return ToolResults.Serialize(new { success = true, breakpoint = bp });
         }
         catch (Exception ex) { return ToolResults.Err(ex); }
     }
