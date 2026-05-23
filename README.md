@@ -1,6 +1,7 @@
 # aspnetcore-debugger-mcp
 
 [![CI](https://github.com/magna-nz/aspnetcore-debugger-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/magna-nz/aspnetcore-debugger-mcp/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/vpre/AspNetCoreDebuggerMcp.svg?label=NuGet)](https://www.nuget.org/packages/AspNetCoreDebuggerMcp)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-005FBA)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
