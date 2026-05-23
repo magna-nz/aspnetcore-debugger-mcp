@@ -28,16 +28,17 @@ public sealed class InspectionTools
     }
 
     [McpServerTool(Name = "stacktrace_get")]
-    [Description("Get the call stack of a thread. Defaults to the last-stopped thread.")]
+    [Description("Get the call stack of a thread. By default async state-machine frames are flattened back to their original method names (e.g. UserService.<GetAsync>d__3.MoveNext → UserService.GetAsync) and BCL async infrastructure frames are hidden. Pass raw=true for the unmodified DAP frames.")]
     public async Task<string> StackTraceAsync(
         [Description("Thread id. Defaults to the last-stopped thread.")] int? threadId = null,
         [Description("Skip this many top frames (0 = include the topmost).")] int? startFrame = null,
         [Description("Maximum frames to return.")] int? levels = null,
+        [Description("If true, return raw DAP frames (no async flattening, no infrastructure filtering).")] bool raw = false,
         CancellationToken ct = default)
     {
         try
         {
-            var frames = await _manager.GetStackTraceAsync(threadId, startFrame, levels, ct).ConfigureAwait(false);
+            var frames = await _manager.GetStackTraceAsync(threadId, startFrame, levels, raw, ct).ConfigureAwait(false);
             return ToolResults.Serialize(new { success = true, frames });
         }
         catch (Exception ex) { return ToolResults.Err(ex); }

@@ -118,10 +118,10 @@ public sealed class DebugSessionManager : IAsyncDisposable
         => RequireActiveSession().ListThreadsAsync(ct);
 
     public Task<IReadOnlyList<StackFrame>> GetStackTraceAsync(
-        int? threadId, int? startFrame, int? levels, CancellationToken ct)
+        int? threadId, int? startFrame, int? levels, bool raw, CancellationToken ct)
     {
         var s = RequireActiveSession();
-        return s.GetStackTraceAsync(ResolveThreadIdOrThrow(threadId), startFrame, levels, ct);
+        return s.GetStackTraceAsync(ResolveThreadIdOrThrow(threadId), startFrame, levels, raw, ct);
     }
 
     public async Task<IReadOnlyList<ScopeWithVariables>> GetScopesAsync(

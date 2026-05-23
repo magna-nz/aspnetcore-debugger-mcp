@@ -46,8 +46,8 @@ internal sealed class DebugSession : IAsyncDisposable
         => _inspector.ListThreadsAsync(ct);
 
     public Task<IReadOnlyList<StackFrame>> GetStackTraceAsync(
-        int threadId, int? startFrame, int? levels, CancellationToken ct)
-        => _inspector.GetStackTraceAsync(threadId, startFrame, levels, ct);
+        int threadId, int? startFrame, int? levels, bool raw, CancellationToken ct)
+        => _inspector.GetStackTraceAsync(threadId, startFrame, levels, raw, ct);
 
     public Task<StackFrame?> GetTopFrameAsync(int threadId, CancellationToken ct)
         => _inspector.GetTopFrameAsync(threadId, ct);
@@ -369,7 +369,7 @@ internal sealed class DebugSession : IAsyncDisposable
             IReadOnlyList<string> names = Array.Empty<string>();
             try
             {
-                var frames = await GetStackTraceAsync(t.Id, 0, topFramesPerThread, ct).ConfigureAwait(false);
+                var frames = await GetStackTraceAsync(t.Id, 0, topFramesPerThread, raw: false, ct).ConfigureAwait(false);
                 names = frames.Select(f => f.Name).ToList();
             }
             catch { /* if a single thread fails, keep going */ }

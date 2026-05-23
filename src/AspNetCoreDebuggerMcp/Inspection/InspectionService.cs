@@ -36,7 +36,7 @@ internal sealed class InspectionService
     }
 
     public async Task<IReadOnlyList<StackFrame>> GetStackTraceAsync(
-        int threadId, int? startFrame, int? levels, CancellationToken ct)
+        int threadId, int? startFrame, int? levels, bool raw, CancellationToken ct)
     {
         var args = new Dictionary<string, object?> { ["threadId"] = threadId };
         if (startFrame is int s) args["startFrame"] = s;
@@ -50,12 +50,15 @@ internal sealed class InspectionService
         {
             foreach (var f in arr.EnumerateArray()) list.Add(ParseFrame(f));
         }
-        return list;
+
+        return raw ? list : AsyncStackFlattener.Flatten(list, hideInfrastructure: true);
     }
 
     public async Task<StackFrame?> GetTopFrameAsync(int threadId, CancellationToken ct)
     {
-        var frames = await GetStackTraceAsync(threadId, 0, 1, ct).ConfigureAwait(false);
+        // Always flatten the top frame name so auto-context shows "Foo.BarAsync" instead of
+        // "Foo.<BarAsync>d__3.MoveNext". Single frame, so no infrastructure to skip.
+        var frames = await GetStackTraceAsync(threadId, 0, 1, raw: false, ct).ConfigureAwait(false);
         return frames.Count > 0 ? frames[0] : null;
     }
 
@@ -209,7 +212,7 @@ internal sealed class InspectionService
         }
         catch { /* exceptionInfo may not be available; continue with what we have */ }
 
-        var frames = await GetStackTraceAsync(threadId, 0, topFrameCount, ct).ConfigureAwait(false);
+        var frames = await GetStackTraceAsync(threadId, 0, topFrameCount, raw: false, ct).ConfigureAwait(false);
 
         IReadOnlyList<ScopeWithVariables>? topLocals = null;
         SourceSnippet? snippet = null;
