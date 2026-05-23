@@ -1,71 +1,75 @@
-# Full tools reference
+# Full tool reference
 
-All 26 MCP tools, grouped by category. Tool names map directly to the `name` field in your MCP
-client; agents call them via normal tool-use mechanics — you don't invoke them by hand.
+All 26 tools the agent can use. **You don't call these directly** — Claude picks them based on
+what you ask. This page exists so you can see what's possible and check parameters when you
+want precision.
 
-## Session
+## Starting and stopping a debug session
 
-Lifecycle of one debug session (only one at a time per server instance).
-
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `debug_launch` | Launch a .NET program (`.dll` or apphost) under the debugger. Optional `stopAtEntry`. |
-| `debug_attach` | Attach to an already-running .NET process by PID. |
-| `debug_disconnect` | Terminate the debuggee and tear down the session. |
-| `debug_state` | Return the current session state, process id, and last stop info. |
+| `debug_launch` | Start your .NET app under the debugger. Optionally pause at entry. |
+| `debug_attach` | Attach to a .NET app that's already running, by process id. |
+| `debug_disconnect` | Stop the debug session and shut down the app. |
+| `debug_state` | What state are we in? Running, paused, or terminated; current process id; what the last stop was. |
 
-## Breakpoints
+## Setting breakpoints
 
-The breakpoint registry is the authoritative intent — every mutation re-sends the full per-source
-or per-list set to the DAP adapter.
+The tool keeps track of every breakpoint you've set and reapplies them automatically when needed.
 
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `breakpoint_set` | Line breakpoint. Supports `condition`, `hitCondition`, and `logMessage` (logpoint / tracepoint). |
-| `breakpoint_set_function` | Break when a function is entered, by symbol name. |
-| `breakpoint_set_exception` | Set the active exception-breakpoint filters (`all`, `user-unhandled`). |
-| `breakpoint_set_data` | Watchpoint on a variable. **netcoredbg returns `E_NOTIMPL`** currently — see [limits](limits.md). |
-| `breakpoint_remove` | Remove a breakpoint by id (line, function, or data). |
-| `breakpoint_list` | Snapshot of every breakpoint currently set. |
+| `breakpoint_set` | Stop at a line of code. Optionally only when a condition is true, only after the Nth hit, or just log a message instead of stopping. |
+| `breakpoint_set_function` | Stop when a specific function gets called, by name. |
+| `breakpoint_set_exception` | Stop when an exception is thrown (all of them, or just unhandled ones). |
+| `breakpoint_set_data` | Stop when a specific variable changes. **Not currently supported by `netcoredbg`** — see [limits](limits.md). |
+| `breakpoint_remove` | Remove a breakpoint by id. |
+| `breakpoint_list` | Show every breakpoint that's currently set. |
 
-## Execution
+## Running and stepping
 
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `debug_continue` | Resume the debuggee (defaults to the last-stopped thread). |
-| `debug_pause` | Pause a thread. |
-| `debug_step` | Single-step. `kind: "in"` / `"over"` / `"out"`. |
-| `breakpoint_wait` | **Blocking** wait for the next stop. Returns the stop info **plus auto-context**: top stack frame and a source snippet around the stop with an arrow marker. |
+| `debug_continue` | Resume execution. |
+| `debug_pause` | Pause a running thread. |
+| `debug_step` | Step one instruction. Three flavours: **into** a function call, **over** it (run it without going in), or **out** (run until the current function returns). |
+| `breakpoint_wait` | **Blocking.** Wait for the next time execution stops, then return with: the stop info, the top stack frame, and a few lines of source around it. |
 
-## Inspection
+## Looking at what's happening
 
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `threads_list` | List all threads in the debuggee. |
-| `stacktrace_get` | Call stack of a thread. Async state-machine frames are flattened back to original method names by default; pass `raw=true` for the unmodified DAP frames. |
-| `variables_get` | Scopes + variables for a frame. Recursively expands compound values up to `depth` levels, truncates at `maxChildren`. |
-| `evaluate` | Evaluate a C# expression in the context of a frame. |
-| `variables_set` | Set the value of a variable or any lvalue expression (uses DAP `setExpression` — accepts `user.Name`, `dict[key]`, etc., not just bare names). |
-| `stack_explore` | **Composite.** In one call: full stack + locals at every frame + a pre-rendered ASCII tree showing caller → callee with arrows. |
+| `threads_list` | List every thread in the app. |
+| `stacktrace_get` | The call chain for a thread. Compiler-generated async method names are cleaned up for you by default (e.g. `UserService.GetAsync` instead of `UserService.<GetAsync>d__3.MoveNext`). |
+| `variables_get` | What's in scope at a particular point in the call stack. Compound values like objects and collections get expanded one level deep by default. |
+| `evaluate` | Run a C# expression against a paused frame (e.g. `users.Count`, `user.Name`). |
+| `variables_set` | Change a variable's value mid-run — handy for testing fixes without editing code. Works on any assignable expression, not just bare names. |
+| `stack_explore` | **One-call summary.** Returns the whole call chain *plus* the local variables at each level, with a rendered tree showing depth. Use this when you want the big picture all at once. |
 
-## Diagnostics
+## Diagnosing problems
 
-The agent-value-add tools — composites that bundle multiple DAP requests with structured + pretty-printed output.
+These are the agent-friendly composites — each one bundles several lower-level calls into a single
+result that's ready to drop into a reply.
 
-| Tool | Purpose |
+| Tool | What it does |
 |---|---|
-| `exception_autopsy` | **Composite.** Exception type + inner-exception chain + top stack frames + top-frame locals + source snippet around the throw, all from one call. Use when `state.lastStop.reason == "exception"`. |
-| `hang_analyze` | **Composite.** Auto-pauses if running, lists every thread, classifies each by what blocking primitive it's on (`Monitor` / `WaitHandle` / `Semaphore` / `Task` / `Thread.Join` / `Sleep` / `AwaitingAsync` / `Running`). |
-| `trace_start` | Begin server-side request tracing. Named methods get internal trace breakpoints that capture the call (top frame + locals + stack) and auto-continue — the request flows at near-normal speed and your foreground debug state is untouched. Optional `includeExceptions=true` also captures unhandled exceptions. |
-| `trace_get` | Read the trace events captured since `trace_start`, plus a pre-rendered ASCII timeline with `→` for method entries and `⚠` for exceptions. |
-| `trace_stop` | Stop the active trace and remove its breakpoints. |
-| `process_read_output` | Drain the debuggee's stdout/stderr accumulated since the last call. With ASP.NET Core's default request logging this gives you `Request starting` / `Request finished … 200` lines per request. |
+| `exception_autopsy` | When you've stopped on an exception, this returns everything at once: the exception type, the inner-exception chain, the top of the call stack, the local variables at the throw site, and a snippet of source around the line that threw. |
+| `hang_analyze` | "Why is my app stuck?" Pauses (if needed), looks at every thread, and classifies what each one is blocked on (a lock, a wait handle, a `Task.Wait`, etc.). |
+| `trace_start` | Start watching a set of methods. Each one you name gets caught when it runs — argument values, top frame, and stack are captured — and execution continues immediately. Your code runs at near-normal speed. |
+| `trace_get` | Read the trace events captured since you started, plus a rendered timeline showing each call with `→` and depth-based indentation. |
+| `trace_stop` | Stop the trace and clear its watch points. |
+| `process_read_output` | Drain the app's stdout/stderr since the last call. Captures whatever `Console.WriteLine`, `ILogger`, or ASP.NET Core's request logging produces. |
 
-## Tool design notes
+## Notes on tool behaviour
 
-- **Return shape** — every tool returns JSON of the form `{"success": true, ...}` or `{"success": false, "error": "..."}`. Enums are serialised as camelCase strings (e.g. `"blockedOnMonitor"`, not `0`).
-- **`null` parameters** are omitted by the DAP client before serialisation — netcoredbg's parser rejects null string values in some places.
-- **Defaults** — tools that take optional thread / frame / depth / timeout parameters resolve sensible defaults (last-stopped thread, topmost frame, depth 1, 30 s wait timeout).
-- **Composites** (`exception_autopsy`, `stack_explore`, `hang_analyze`, `trace_*`) bundle multiple DAP requests and return **both** structured data and a pre-rendered text view ready to drop into a reply.
+- **Defaults are sensible.** If you don't pass a thread id, it uses the last-stopped thread.
+  If you don't pass a frame id, it uses the topmost frame. If you don't pass a depth or
+  timeout, you get reasonable values.
+- **Composite tools return both data and a ready-rendered view.** Things like
+  `exception_autopsy`, `stack_explore`, and `trace_get` give you structured data *and* a
+  formatted text version Claude can drop straight into its reply.
+- **Async method names are cleaned up by default.** If you want the raw compiler-generated
+  names back, pass `raw: true` to `stacktrace_get`.
 
-See the [worked examples](examples.md) for what these look like in actual use.
+For the deeper "this is how each tool talks to the debugger" details, the source under
+`src/AspNetCoreDebuggerMcp/Tools/` is the authoritative reference.
