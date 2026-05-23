@@ -177,6 +177,18 @@ public sealed class DebugSessionManager : IAsyncDisposable
     public Task<HangAnalysis> HangAnalyzeAsync(int topFramesPerThread, CancellationToken ct)
         => RequireActiveSession().HangAnalyzeAsync(topFramesPerThread, ct);
 
+    public Task<TraceConfig> TraceStartAsync(
+        IReadOnlyList<string> methods, bool captureStack, bool captureLocals,
+        bool includeExceptions, int maxFramesPerEvent, int maxLocalsPerFrame, CancellationToken ct)
+        => RequireActiveSession().TraceStartAsync(methods, captureStack, captureLocals,
+            includeExceptions, maxFramesPerEvent, maxLocalsPerFrame, ct);
+
+    public IReadOnlyList<TraceEvent> TraceGet(int? maxEvents)
+        => _session?.TraceGet(maxEvents) ?? Array.Empty<TraceEvent>();
+
+    public Task TraceStopAsync(CancellationToken ct)
+        => RequireActiveSession().TraceStopAsync(ct);
+
     public IReadOnlyList<OutputLine> DrainOutput(string? category, int? maxLines)
         => _session?.DrainOutput(category, maxLines) ?? Array.Empty<OutputLine>();
 

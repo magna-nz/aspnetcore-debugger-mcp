@@ -18,7 +18,9 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly StopWaiter _stopWaiter = new();
     private readonly BreakpointRegistry _breakpoints = new();
     private readonly InspectionService _inspector;
+    private readonly TraceCollector _trace = new();
     private readonly ConcurrentQueue<OutputLine> _outputBuffer = new();
+    private IReadOnlyList<string> _exceptionFiltersBeforeTrace = Array.Empty<string>();
     private readonly TaskCompletionSource _initializedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
@@ -236,6 +238,7 @@ internal sealed class DebugSession : IAsyncDisposable
         string sourcePath, int line, string? condition, string? hitCondition, string? logMessage,
         CancellationToken ct)
     {
+        RejectIfTraceActive();
         var bp = _breakpoints.AddLine(sourcePath, line, condition, hitCondition, logMessage);
         await SyncSourceAsync(sourcePath, ct).ConfigureAwait(false);
         return _breakpoints.ForSource(sourcePath).First(b => b.Id == bp.Id);
@@ -244,9 +247,18 @@ internal sealed class DebugSession : IAsyncDisposable
     public async Task<FunctionBreakpoint> AddFunctionBreakpointAsync(
         string functionName, string? condition, string? hitCondition, CancellationToken ct)
     {
+        RejectIfTraceActive();
         var bp = _breakpoints.AddFunction(functionName, condition, hitCondition);
         await SyncFunctionsAsync(ct).ConfigureAwait(false);
         return _breakpoints.AllFunction().First(f => f.Id == bp.Id);
+    }
+
+    private void RejectIfTraceActive()
+    {
+        if (_trace.IsActive)
+            throw new DebugException(
+                "A trace is active. Call trace_stop before adding user breakpoints — trace mode " +
+                "needs to own all breakpoints to correctly identify trace hits.");
     }
 
     public async Task<bool> RemoveBreakpointAsync(string id, CancellationToken ct)
@@ -272,6 +284,7 @@ internal sealed class DebugSession : IAsyncDisposable
     public async Task<DataBreakpoint> AddDataBreakpointAsync(
         int variablesReference, string name, string accessType, CancellationToken ct)
     {
+        RejectIfTraceActive();
         var probe = await _client.SendRequestAsync("dataBreakpointInfo",
             new { variablesReference, name }, ct).ConfigureAwait(false);
         if (!probe.Success)
@@ -381,11 +394,62 @@ internal sealed class DebugSession : IAsyncDisposable
     public async Task SetExceptionFiltersAsync(IEnumerable<string> filters, CancellationToken ct)
     {
         _breakpoints.SetExceptionFilters(filters);
-        var current = _breakpoints.Snapshot().ExceptionFilters.ToArray();
+        await SyncExceptionFiltersAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task SyncExceptionFiltersAsync(CancellationToken ct)
+    {
+        // Union user filters with the trace's filter (if any) so trace_start adds — not replaces —
+        // exception breaks.
+        var userFilters = _breakpoints.Snapshot().ExceptionFilters;
+        var combined = userFilters.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (_trace.ExceptionTracingEnabled) combined.Add("user-unhandled");
+
         var resp = await _client.SendRequestAsync("setExceptionBreakpoints",
-            new { filters = current }, ct).ConfigureAwait(false);
+            new { filters = combined.ToArray() }, ct).ConfigureAwait(false);
         if (!resp.Success)
             throw new DebugException($"setExceptionBreakpoints failed: {resp.Message ?? "unknown"}");
+    }
+
+    // ---- trace --------------------------------------------------------------------
+
+    public TraceCollector TraceCollector => _trace;
+
+    public async Task<TraceConfig> TraceStartAsync(
+        IReadOnlyList<string> methods, bool captureStack, bool captureLocals,
+        bool includeExceptions, int maxFramesPerEvent, int maxLocalsPerFrame, CancellationToken ct)
+    {
+        // Invariant: while a trace is active, every breakpoint stop must be a trace stop.
+        // netcoredbg doesn't include hitBreakpointIds in stopped events, so we can't otherwise
+        // distinguish a trace BP from a user BP — enforce that no user BPs exist at trace start,
+        // and refuse user BP mutations while the trace runs.
+        var snap = _breakpoints.Snapshot();
+        if (snap.Line.Count > 0 || snap.Function.Count > 0 || snap.Data.Count > 0)
+            throw new DebugException(
+                "Remove user breakpoints (breakpoint_remove) before starting a trace. " +
+                "Trace mode owns all breakpoints for the duration of the trace.");
+
+        var cfg = _trace.Start(methods, captureStack, captureLocals, includeExceptions,
+            maxFramesPerEvent, maxLocalsPerFrame);
+        _exceptionFiltersBeforeTrace = snap.ExceptionFilters;
+
+        await SyncFunctionsAsync(ct).ConfigureAwait(false);
+        if (includeExceptions) await SyncExceptionFiltersAsync(ct).ConfigureAwait(false);
+        return cfg;
+    }
+
+    public IReadOnlyList<TraceEvent> TraceGet(int? maxEvents) => _trace.Events(maxEvents);
+
+    public async Task TraceStopAsync(CancellationToken ct)
+    {
+        var stopped = _trace.Stop();
+        await SyncFunctionsAsync(ct).ConfigureAwait(false);
+        if (stopped is { IncludeExceptions: true })
+        {
+            // Restore user's pre-trace exception filters exactly.
+            _breakpoints.SetExceptionFilters(_exceptionFiltersBeforeTrace);
+            await SyncExceptionFiltersAsync(ct).ConfigureAwait(false);
+        }
     }
 
     private async Task SyncSourceAsync(string sourcePath, CancellationToken ct)
@@ -412,21 +476,45 @@ internal sealed class DebugSession : IAsyncDisposable
 
     private async Task SyncFunctionsAsync(CancellationToken ct)
     {
-        var fns = _breakpoints.AllFunction();
-        var args = new
-        {
-            breakpoints = fns.Select(f => new
-            {
-                name = f.FunctionName,
-                condition = f.Condition,
-                hitCondition = f.HitCondition,
-            }).ToArray(),
-        };
-        var resp = await _client.SendRequestAsync("setFunctionBreakpoints", args, ct).ConfigureAwait(false);
+        // Combined send: user function BPs followed by trace function BPs.
+        // setFunctionBreakpoints is a full-replacement contract, so we must always send both.
+        var userFns = _breakpoints.AllFunction();
+        var traceMethods = _trace.TracedMethods();
+
+        var bps = new List<object>(userFns.Count + traceMethods.Count);
+        foreach (var f in userFns)
+            bps.Add(new { name = f.FunctionName, condition = f.Condition, hitCondition = f.HitCondition });
+        foreach (var m in traceMethods)
+            bps.Add(new { name = m });   // trace BPs: no condition, no logMessage — must stop so we can intercept
+
+        var resp = await _client.SendRequestAsync("setFunctionBreakpoints",
+            new { breakpoints = bps.ToArray() }, ct).ConfigureAwait(false);
         if (!resp.Success)
             throw new DebugException($"setFunctionBreakpoints failed: {resp.Message ?? "unknown"}");
 
-        ApplySetBreakpointsResponse(resp, fns, isLine: false);
+        if (resp.Body is not { } body) return;
+        if (!body.TryGetProperty("breakpoints", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+
+        var traceAdapterIds = new List<int>();
+        int i = 0;
+        foreach (var elem in arr.EnumerateArray())
+        {
+            var verified = elem.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True;
+            int? adapterId =
+                elem.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number
+                    ? idEl.GetInt32() : null;
+
+            if (i < userFns.Count)
+            {
+                _breakpoints.UpdateFunction(userFns[i].Id, verified, adapterId);
+            }
+            else
+            {
+                if (adapterId is int aid) traceAdapterIds.Add(aid);
+            }
+            i++;
+        }
+        _trace.SetAdapterIds(traceAdapterIds);
     }
 
     private void ApplySetBreakpointsResponse<T>(DapMessage resp, IReadOnlyList<T> registryBps, bool isLine)
@@ -463,7 +551,7 @@ internal sealed class DebugSession : IAsyncDisposable
                 break;
 
             case "stopped":
-                HandleStopped(e);
+                if (!TryHandleTraceStop(e)) HandleStopped(e);
                 break;
 
             case "continued":
@@ -493,6 +581,119 @@ internal sealed class DebugSession : IAsyncDisposable
                 _stopWaiter.Terminate();
                 break;
         }
+    }
+
+    /// Returns true if this stop matched an active trace and was handled (captured + auto-continued
+    /// on a background task). When it returns true, the caller MUST NOT run the normal Paused-state
+    /// transition: trace stops are invisible to the user-facing session state and StopWaiter.
+    ///
+    /// We can't identify which specific BP hit (netcoredbg doesn't populate hitBreakpointIds), so
+    /// the trace_start invariant — no user BPs while a trace is active — lets us treat every
+    /// breakpoint stop during a trace as a trace hit unambiguously.
+    private bool TryHandleTraceStop(DapMessage e)
+    {
+        if (!_trace.IsActive) return false;
+        if (e.Body is not { } body) return false;
+
+        var reason = body.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String
+            ? r.GetString() ?? "" : "";
+        int? threadId = body.TryGetProperty("threadId", out var t) && t.ValueKind == JsonValueKind.Number
+            ? t.GetInt32() : null;
+
+        bool isBreakpoint = reason == "breakpoint";
+        bool isExceptionTrace = reason == "exception" && _trace.ExceptionTracingEnabled;
+        if (!isBreakpoint && !isExceptionTrace) return false;
+
+        // Background: do the captures + auto-continue WITHOUT blocking the read loop
+        // (synchronous DAP request/response from inside the read loop would deadlock).
+        _ = Task.Run(() => CaptureTraceAndContinueAsync(threadId, isExceptionTrace));
+        return true;
+    }
+
+    private async Task CaptureTraceAndContinueAsync(int? threadId, bool isException)
+    {
+        var opts = _trace.CaptureOptions;
+        if (opts is null)
+        {
+            // Trace was stopped between event-arrival and our task start. Still need to continue.
+            await TryAutoContinueAsync(threadId).ConfigureAwait(false);
+            return;
+        }
+        var (captureStack, captureLocals, maxFrames, maxLocals) = opts.Value;
+        var tid = threadId ?? 0;
+        var elapsed = _trace.ElapsedMs(DateTimeOffset.UtcNow);
+
+        IReadOnlyList<StackFrame>? stack = null;
+        IReadOnlyList<VariableInfo>? locals = null;
+        string? method = null;
+        string? exceptionType = null;
+        string? exceptionMessage = null;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        if (tid != 0 && (captureStack || captureLocals || isException))
+        {
+            try
+            {
+                var frames = await _inspector.GetStackTraceAsync(tid, 0, maxFrames, raw: false, cts.Token)
+                    .ConfigureAwait(false);
+                if (frames.Count > 0)
+                {
+                    method = frames[0].Name;
+                    if (captureStack) stack = frames;
+                    if (captureLocals)
+                    {
+                        try
+                        {
+                            var scopes = await _inspector.GetScopesAsync(frames[0].Id, depth: 1, maxLocals, cts.Token)
+                                .ConfigureAwait(false);
+                            locals = scopes.FirstOrDefault(s =>
+                                string.Equals(s.Name, "Locals", StringComparison.OrdinalIgnoreCase))?.Variables
+                                ?? scopes.FirstOrDefault()?.Variables;
+                        }
+                        catch { /* best-effort */ }
+                    }
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        if (isException && tid != 0)
+        {
+            try
+            {
+                var info = await _client.SendRequestAsync("exceptionInfo",
+                    new { threadId = tid }, cts.Token).ConfigureAwait(false);
+                if (info.Success && info.Body is { } body)
+                {
+                    if (body.TryGetProperty("exceptionId", out var et) && et.ValueKind == JsonValueKind.String)
+                        exceptionType = et.GetString();
+                    if (body.TryGetProperty("description", out var ed) && ed.ValueKind == JsonValueKind.String)
+                        exceptionMessage = ed.GetString();
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        _trace.Append(new TraceEvent(
+            elapsed,
+            isException ? TraceEventKind.Exception : TraceEventKind.Enter,
+            tid, method, exceptionType, exceptionMessage, locals, stack));
+
+        await TryAutoContinueAsync(threadId).ConfigureAwait(false);
+    }
+
+    private async Task TryAutoContinueAsync(int? threadId)
+    {
+        var tid = threadId ?? 0;
+        if (tid == 0) return;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _client.SendRequestAsync("continue",
+                new Dictionary<string, object?> { ["threadId"] = tid }, cts.Token).ConfigureAwait(false);
+        }
+        catch { /* if continue fails the agent will notice via debug_state */ }
     }
 
     private void HandleStopped(DapMessage e)
