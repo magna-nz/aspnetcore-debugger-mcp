@@ -41,29 +41,43 @@ public class TraceRendererTests
     }
 
     [Fact]
-    public void IndentsByRelativeStackDepth()
+    public void NestedCallsRenderProgressivelyDeeperArrows()
     {
-        // Three calls: depth 3, 4, 5. Output should show 0, 2, 4 spaces of indent.
+        // Three traced methods, each nested inside the previous. The renderer should count
+        // traced ancestors in each event's stack and produce →, --→, ----→.
         var e1 = new TraceEvent(0, TraceEventKind.Enter, 1, "Ctrl",
-            null, null, null, new[] { Sf(1,"Ctrl"), Sf(2,"K1"), Sf(3,"K2") });          // depth 3
+            null, null, null, new[] { Sf(1, "Ctrl"), Sf(2, "K1") });                       // 0 traced ancestors
         var e2 = new TraceEvent(2, TraceEventKind.Enter, 1, "Svc",
-            null, null, null, new[] { Sf(1,"Svc"), Sf(2,"Ctrl"), Sf(3,"K1"), Sf(4,"K2") }); // depth 4
+            null, null, null, new[] { Sf(1, "Svc"), Sf(2, "Ctrl"), Sf(3, "K1") });          // 1 traced ancestor
         var e3 = new TraceEvent(5, TraceEventKind.Enter, 1, "Repo",
-            null, null, null, new[] { Sf(1,"Repo"), Sf(2,"Svc"), Sf(3,"Ctrl"), Sf(4,"K1"), Sf(5,"K2") }); // depth 5
+            null, null, null, new[] { Sf(1, "Repo"), Sf(2, "Svc"), Sf(3, "Ctrl"), Sf(4, "K1") }); // 2 traced ancestors
 
         var output = TraceRenderer.Render(new[] { e1, e2, e3 });
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        // Strip the "[+    Nms] " prefix to inspect the indentation.
         var bodies = lines.Select(l =>
         {
             int p = l.IndexOf(']');
             return p >= 0 ? l[(p + 2)..] : l;
         }).ToList();
 
-        Assert.StartsWith("→ Ctrl", bodies[0]);
-        Assert.StartsWith("  → Svc", bodies[1]);
-        Assert.StartsWith("    → Repo", bodies[2]);
+        Assert.Equal("→ Ctrl", bodies[0]);
+        Assert.Equal("--→ Svc", bodies[1]);
+        Assert.Equal("----→ Repo", bodies[2]);
+    }
+
+    [Fact]
+    public void NonTracedFrameBetweenTwoTracedFramesStillNestsCorrectly()
+    {
+        // A calls Wrapper (not traced) calls B. From the trace's POV B is nested 1 deep
+        // inside A even though Wrapper sits between them on the stack.
+        var eA = new TraceEvent(0, TraceEventKind.Enter, 1, "A",
+            null, null, null, new[] { Sf(1, "A"), Sf(2, "K") });
+        var eB = new TraceEvent(1, TraceEventKind.Enter, 1, "B",
+            null, null, null, new[] { Sf(1, "B"), Sf(2, "Wrapper"), Sf(3, "A"), Sf(4, "K") });
+
+        var output = TraceRenderer.Render(new[] { eA, eB });
+        Assert.Contains("→ A", output);
+        Assert.Contains("--→ B", output);
     }
 
     [Fact]
