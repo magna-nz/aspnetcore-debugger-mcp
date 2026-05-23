@@ -50,3 +50,11 @@ public sealed record ExceptionLayer(
     string? TypeName,
     string? Message,
     string? Source);
+
+public sealed record FrameWithLocals(
+    StackFrame Frame,
+    IReadOnlyList<ScopeWithVariables> Scopes);
+
+public sealed record StackExplore(
+    IReadOnlyList<FrameWithLocals> Frames,
+    string Tree);

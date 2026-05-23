@@ -145,12 +145,49 @@ public sealed class DebugSessionManager : IAsyncDisposable
         return s.AutopsyAsync(ResolveThreadIdOrThrow(threadId), topFrameCount, ct);
     }
 
+    public async Task<StackExplore> StackExploreAsync(
+        int? threadId, int maxFrames, int maxLocalsPerFrame, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        var tid = ResolveThreadIdOrThrow(threadId);
+        var frames = await s.GetStackTraceAsync(tid, 0, maxFrames, raw: false, ct).ConfigureAwait(false);
+        var withLocals = new List<FrameWithLocals>(frames.Count);
+        foreach (var f in frames)
+        {
+            IReadOnlyList<ScopeWithVariables> scopes;
+            try
+            {
+                scopes = await s.GetScopesAsync(f.Id, depth: 1, maxChildren: maxLocalsPerFrame, ct)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // A single frame's scopes failing shouldn't kill the whole tree.
+                scopes = Array.Empty<ScopeWithVariables>();
+            }
+            withLocals.Add(new FrameWithLocals(f, scopes));
+        }
+        return new StackExplore(withLocals, StackTreeRenderer.Render(withLocals));
+    }
+
     public Task<DataBreakpoint> AddDataBreakpointAsync(
         int variablesReference, string name, string accessType, CancellationToken ct)
         => RequireActiveSession().AddDataBreakpointAsync(variablesReference, name, accessType, ct);
 
     public Task<HangAnalysis> HangAnalyzeAsync(int topFramesPerThread, CancellationToken ct)
         => RequireActiveSession().HangAnalyzeAsync(topFramesPerThread, ct);
+
+    public Task<TraceConfig> TraceStartAsync(
+        IReadOnlyList<string> methods, bool captureStack, bool captureLocals,
+        bool includeExceptions, int maxFramesPerEvent, int maxLocalsPerFrame, CancellationToken ct)
+        => RequireActiveSession().TraceStartAsync(methods, captureStack, captureLocals,
+            includeExceptions, maxFramesPerEvent, maxLocalsPerFrame, ct);
+
+    public IReadOnlyList<TraceEvent> TraceGet(int? maxEvents)
+        => _session?.TraceGet(maxEvents) ?? Array.Empty<TraceEvent>();
+
+    public Task TraceStopAsync(CancellationToken ct)
+        => RequireActiveSession().TraceStopAsync(ct);
 
     public IReadOnlyList<OutputLine> DrainOutput(string? category, int? maxLines)
         => _session?.DrainOutput(category, maxLines) ?? Array.Empty<OutputLine>();

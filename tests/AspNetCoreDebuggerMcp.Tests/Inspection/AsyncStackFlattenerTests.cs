@@ -8,6 +8,9 @@ public class AsyncStackFlattenerTests
     [InlineData("MyApp.UserService.<GetUserAsync>d__3.MoveNext()", "MyApp.UserService.GetUserAsync()")]
     [InlineData("MyApp.Foo.<DoAsync>d__7.MoveNext", "MyApp.Foo.DoAsync")]
     [InlineData("MyApp.Controllers.UserController.<GetAsync>d__5.MoveNext()", "MyApp.Controllers.UserController.GetAsync()")]
+    [InlineData(
+        "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol.<ProcessRequests>d__237<Microsoft.AspNetCore.Hosting.HostingApplication.Context>.MoveNext()",
+        "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol.ProcessRequests()")]
     public void RewriteName_StateMachineToOriginal(string input, string expected)
     {
         Assert.Equal(expected, AsyncStackFlattener.RewriteName(input));
