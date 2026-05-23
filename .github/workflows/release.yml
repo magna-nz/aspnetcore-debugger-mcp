@@ -1,0 +1,94 @@
+name: Release
+
+# Fires when you publish a GitHub Release from the UI (or via `gh release create`).
+# Tag convention is `v0.1.0-preview`, `v0.2.0`, etc. — the leading `v` is stripped to form
+# the NuGet package version. workflow_dispatch is provided for manual dry runs.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to pack (e.g. 0.1.0-preview). For dry runs.'
+        required: true
+        type: string
+      push_to_nuget:
+        description: 'Also push to NuGet.org? (workflow_dispatch only — release events always push if the secret is set)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to upload the .nupkg as a release asset
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'ga'
+
+      - name: Resolve version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          RELEASE_TAG:   ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            v="${RELEASE_TAG#v}"
+          else
+            v="$INPUT_VERSION"
+          fi
+          if [ -z "$v" ]; then
+            echo "Could not resolve a version (empty)." >&2
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $v"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore /p:Version=${{ steps.ver.outputs.version }}
+
+      - name: Test
+        run: dotnet test -c Release --no-build --verbosity normal
+
+      - name: Pack
+        run: |
+          dotnet pack src/AspNetCoreDebuggerMcp -c Release --no-build \
+            -o nupkg /p:Version=${{ steps.ver.outputs.version }}
+
+      - name: Show pack output
+        run: ls -lh nupkg/
+
+      - name: Attach .nupkg to the GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nupkg/*.nupkg
+
+      - name: Push to NuGet.org
+        # Always run for release events; only run for workflow_dispatch if explicitly requested.
+        if: |
+          github.event_name == 'release' ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.push_to_nuget == 'true')
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::warning::NUGET_API_KEY secret is not set — skipping NuGet.org push."
+            echo "Add it at https://github.com/${{ github.repository }}/settings/secrets/actions"
+            exit 0
+          fi
+          dotnet nuget push nupkg/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
