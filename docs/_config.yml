@@ -1,0 +1,6 @@
+title: aspnetcore-debugger-mcp
+description: An MIT-licensed Model Context Protocol server that lets AI agents debug .NET / ASP.NET Core apps conversationally.
+theme: jekyll-theme-cayman
+show_downloads: false
+github:
+  is_project_page: true
