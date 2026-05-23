@@ -56,37 +56,47 @@ composites on top — `exception_autopsy`, `stack_explore`, `hang_analyze`, and 
 
 ---
 
-## Install
+## Use it in 4 steps
 
-You need three things: the .NET 10 SDK, `netcoredbg`, and this tool.
+Once per machine: install prerequisites and the tool. Once per project: register it. Then just chat.
 
-**1. .NET 10 SDK** — [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download).
+### Step 1 — Prerequisites *(once per machine)*
 
-**2. netcoredbg:**
+- **.NET 10 SDK** — [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download)
+- **netcoredbg** — Samsung's MIT-licensed .NET debugger that this server drives:
 
-| Platform | Get it from |
-|---|---|
-| Linux x64 / arm64 | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
-| Windows x64 | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
-| macOS Intel (x64) | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
-| **macOS Apple Silicon (arm64)** | **No prebuilt — build with `scripts/build-netcoredbg-macos-arm64.sh`** |
+  | Platform | Get it from |
+  |---|---|
+  | Linux x64 / arm64 | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
+  | Windows x64 | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
+  | macOS Intel (x64) | [Samsung release](https://github.com/Samsung/netcoredbg/releases) |
+  | **macOS Apple Silicon (arm64)** | **No prebuilt — build with `scripts/build-netcoredbg-macos-arm64.sh`** |
+- **Claude Code** or **Claude Desktop** installed.
 
-Then point the server at it: `export NETCOREDBG_PATH=/absolute/path/to/netcoredbg` (or put it on
-`PATH`, or place it next to the tool's assembly).
-
-**3. The MCP server:**
+### Step 2 — Install the MCP server *(once per machine)*
 
 ```bash
 dotnet tool install -g AspNetCoreDebuggerMcp --prerelease
 ```
 
-Verify: `NETCOREDBG_PATH=/path/to/netcoredbg aspnetcore-debugger-mcp` should start without errors.
+That puts the `aspnetcore-debugger-mcp` binary on your `PATH`. Verify:
 
----
+```bash
+NETCOREDBG_PATH=/path/to/netcoredbg aspnetcore-debugger-mcp
+# starts and idles on stdin; Ctrl-C to exit
+```
 
-## Configure your MCP client
+### Step 3 — Register it with your MCP client *(once per project, or globally)*
 
-### Claude Code (`.mcp.json`)
+**Claude Code** — either run:
+
+```bash
+claude mcp add aspnetcore-debugger \
+  -e NETCOREDBG_PATH=/path/to/netcoredbg \
+  -- aspnetcore-debugger-mcp
+```
+
+or edit `.mcp.json` (project) / `~/.claude.json` (global) directly:
 
 ```json
 {
@@ -99,9 +109,15 @@ Verify: `NETCOREDBG_PATH=/path/to/netcoredbg aspnetcore-debugger-mcp` should sta
 }
 ```
 
-### Claude Desktop (`claude_desktop_config.json`)
+**Claude Desktop** — same JSON shape goes in `claude_desktop_config.json`'s `mcpServers` block.
 
-Same shape — drop the snippet above into the `mcpServers` block.
+### Step 4 — Just chat with Claude
+
+Open Claude Code (or Claude Desktop) in your .NET project. Run `/mcp` to confirm `aspnetcore-debugger` shows as connected. From here, **don't invoke the tools yourself** — just describe what you want:
+
+> *"Debug my API and figure out why `GET /users/42` returns null."*
+
+Claude picks the right tools (`debug_launch`, `breakpoint_set`, `variables_get`, etc.) and reports back what it actually saw at runtime.
 
 ---
 
