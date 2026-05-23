@@ -33,6 +33,15 @@
   breakpoint_set_data, process_read_output. 44 unit tests passing. End-to-end Wave 4 smoke
   validates hang_analyze classifying threads and process_read_output capturing "Sum: 30".
   Enum responses now serialize as camelCase strings (e.g. "blockedOnMonitor"), not ints.
+- WAVE 5 COMPLETE: packaging + docs. csproj wired for PackAsTool with ToolCommandName
+  "aspnetcore-debugger-mcp", PackageId AspNetCoreDebuggerMcp, version 0.1.0-preview, MIT
+  license, README packed in. Full README replaces the placeholder: tools table (all 22),
+  install steps for .NET / netcoredbg / the tool, Claude Code + Claude Desktop config
+  snippets, macOS arm64 note, known limits (data BP adapter dep, process_write_input gap).
+  scripts/build-netcoredbg-macos-arm64.sh automates the arm64 netcoredbg build with the
+  cmake-4.x policy workaround. GitHub Actions CI workflow (.github/workflows/ci.yml):
+  Linux + macOS matrix, restore/build/test, dotnet pack on Linux + upload nupkg artifact.
+  Local `dotnet pack` succeeds — produced AspNetCoreDebuggerMcp.0.1.0-preview.nupkg.
 
 ## Decisions made
 - **Approach:** MCP server that wraps `netcoredbg` (MIT) over the Debug Adapter Protocol — chosen
@@ -45,15 +54,14 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- Wave 4 done on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
-- 22 MCP tools live. Awaiting user "go" for Wave 5 (final).
+- ALL 5 WAVES COMPLETE on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
+- 22 MCP tools live, 44 unit tests passing, end-to-end smoke for every wave passes, NuGet
+  package builds, README done, CI defined.
+- Awaiting decision on raising the PR.
 
 ## What's next
-1. Wave 5 (needs user "go" — last wave): package as a .NET tool, netcoredbg bundling decision,
-   README, macOS setup guide, CI.
-2. After Wave 5: raise the PR.
-3. Run NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg when launching the server until
-   bundling is sorted (Wave 5).
+1. Raise the PR (one branch, one PR, all 5 waves) — needs user confirmation.
+2. Decide whether to publish the NuGet package (and to what feed) — out of scope for the PR.
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.

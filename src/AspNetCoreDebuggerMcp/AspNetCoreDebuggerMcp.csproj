@@ -7,7 +7,27 @@
     <Nullable>enable</Nullable>
     <RootNamespace>AspNetCoreDebuggerMcp</RootNamespace>
     <AssemblyName>AspNetCoreDebuggerMcp</AssemblyName>
+
+    <!-- .NET tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>aspnetcore-debugger-mcp</ToolCommandName>
+    <PackageId>AspNetCoreDebuggerMcp</PackageId>
+    <Version>0.1.0-preview</Version>
+
+    <!-- NuGet metadata -->
+    <Authors>magna-nz</Authors>
+    <Description>MIT-licensed Model Context Protocol server that gives AI agents interactive .NET debugging by wrapping netcoredbg (Samsung) over the Debug Adapter Protocol. 22 tools across session management, breakpoints, execution, inspection, evaluation, exception analysis, hang detection, and process output.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>mcp;mcp-server;debugger;dotnet;netcoredbg;dap;ai;ai-agent;debugging;breakpoints;aspnetcore</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
