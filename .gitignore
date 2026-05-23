@@ -2,6 +2,7 @@
 bin/
 obj/
 out/
+nupkg/
 
 # .NET
 *.user
