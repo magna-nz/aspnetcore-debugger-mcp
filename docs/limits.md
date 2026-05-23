@@ -1,54 +1,56 @@
-# Known limits
+# What this tool isn't for
 
-Honest scope notes. These aren't bugs — they're trade-offs we made, or things the underlying
-debugger adapter doesn't support.
+Honest scope notes — these aren't bugs, they're trade-offs. Use the right tool for the job:
 
-## When NOT to use this tool
-
-A debugger fundamentally needs to **pause** to see anything. If you don't want to pause, this is
-the wrong tool. Use the right tool for the job:
-
-| Want | Use |
+| You want | Use |
 |---|---|
-| "Why does this return wrong data" | **this tool** — pause, read state, find out |
-| "Every method called during a request, with arguments" | **`trace_start`** in this tool |
-| "Every method ever called, no instrumentation, no manual list" | A sampling profiler (`dotnet-trace`, OpenTelemetry) |
+| "Why does this return the wrong data?" | **This tool** — pause your code, read the real values, find out |
+| "Every method called during a request, with arguments" | **This tool's tracing** (see the [examples](examples.md#show-me-the-path-a-request-takes-through-my-code)) |
+| "Every method ever called, no instrumentation, no list of names" | A sampling profiler like [`dotnet-trace`](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace) |
 | "Just hit my endpoint and see the response" | `curl` |
-| "What's slow?" | A profiler — debuggers don't measure perf |
-| "Production observability" | Logs / metrics / APM |
-| "Read the code" | Your IDE / GitHub |
+| "What's slow?" | A profiler — debuggers don't measure performance |
+| "What happened in production?" | Logs, metrics, or an APM (Application Performance Monitoring) tool |
+| "I want to read the code" | Your IDE / GitHub |
 
-## Adapter limits
+## A few things this tool can't do (yet)
 
-- **`breakpoint_set_data` depends on the adapter.** netcoredbg currently returns `E_NOTIMPL` for
-  `dataBreakpointInfo`. The tool surfaces this as a clean error; another adapter (or a future
-  netcoredbg) would just work — no code change needed on our side.
-- **`process_write_input` is not implemented.** DAP launch mode owns the debuggee's stdin;
-  piping input would require a different launch architecture (we launch the process, netcoredbg
-  attaches). Doable, just not done.
+### Data breakpoints
 
-## Tracing limits
+The watchpoint tool (`breakpoint_set_data`) is wired up, but the underlying debugger
+(`netcoredbg`) doesn't support data breakpoints yet — so for now the tool returns a clear "not
+supported" error. If `netcoredbg` adds support later, the tool will start working with no
+changes on our side.
 
-- **Tracing has overhead.** Each trace BP hit ≈ a handful of DAP round-trips. Fine for tracing a
-  few methods through a single request (a few hundred ms total overhead); **not** suited to
-  high-throughput loads or tracing every method in a namespace — use a real profiler for that.
-- **Trace mode owns all breakpoints.** While a trace is active, user breakpoints can't be added.
-  This sidesteps netcoredbg not populating `hitBreakpointIds` in stopped events, so we can't
-  otherwise tell a trace BP hit from a user BP hit. Call `trace_stop` first if you need to set
-  user breakpoints.
+### Writing to the running app's standard input
 
-## Async-stack limits
+You can read the app's stdout/stderr, but you can't pipe text into its `stdin` while it's
+running. This is a structural limit of how the debugger launches your app; it'd need a
+different launch model to fix.
 
-- **State-machine frame names are flattened** (`UserService.<GetAsync>d__3.MoveNext` →
-  `UserService.GetAsync`) and BCL async infrastructure is hidden — good enough for normal use.
-- We **don't walk the heap to reconstruct logical "who awaited this"** when the awaiter isn't on
-  the current thread. That needs ICorDebug-level access beyond what DAP exposes. If this becomes
-  a pain point, it's a future enhancement.
+### Tracing has overhead
 
-## What you can fix with config / your code
+Each traced method call costs a handful of round-trips between the server and the debugger.
+**Fine for tracing a few methods through a single request** (a few hundred ms total overhead).
+**Not** suited to high-throughput loads or tracing every method in a namespace — that's
+profiler territory.
 
-| Symptom | Fix |
+### Tracing can't share a session with manual breakpoints
+
+While a trace is running, you can't also have your own breakpoints set. Call **stop trace**
+first if you need to switch back to manual debugging.
+
+### Async stack traces
+
+Method names in the stack are unmangled (you see `UserService.GetUserAsync`, not the cryptic
+compiler version). But we don't walk the heap to reconstruct the logical "who awaited this
+method" when the original caller isn't on the current thread — you only see what's actually
+on the stack right now.
+
+## Tips when something doesn't work
+
+| What you see | Likely fix |
 |---|---|
-| `breakpoint_set_function` doesn't hit | Use the exact symbol name. For generic methods, include the type parameter (`Foo``1.Bar`). |
-| Trace shows depth 0 for everything | Increase `maxFramesPerEvent` so the captured stack reaches your traced ancestors. |
-| Variable values show as `null` when you expect data | The breakpoint may have hit *before* assignment — check the source snippet. |
+| Setting a breakpoint on a function name doesn't catch it | Use the exact fully-qualified name. For generic methods, include the type parameter (`Foo``1.Bar`). |
+| The trace shows everything at the same depth | Increase the *frames per event* setting so each captured stack reaches your other traced methods. |
+| Variable values are `null` when you expect data | Your breakpoint may have stopped *before* the variable was assigned — check the source snippet that comes back with the stop. |
+| The server shows as disconnected in `/mcp` | The `NETCOREDBG_PATH` env var isn't pointing at the binary. Test it: `NETCOREDBG_PATH=… aspnetcore-debugger-mcp` should start in a regular shell. |
