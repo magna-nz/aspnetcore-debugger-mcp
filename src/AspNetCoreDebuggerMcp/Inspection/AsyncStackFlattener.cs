@@ -13,8 +13,10 @@ namespace AspNetCoreDebuggerMcp.Inspection;
 /// `<>c.<<Main>$>b__0_0()` are intentionally left alone because they are not the outer method.
 public static class AsyncStackFlattener
 {
+    // Matches `.<Method>d__N.MoveNext` and `.<Method>d__N<TGenericArgs>.MoveNext` —
+    // ASP.NET Core / Kestrel pipelines use generic state machines.
     private static readonly Regex MoveNextRx = new(
-        @"\.<(?<m>[A-Za-z_][A-Za-z0-9_]*)>d__\d+\.MoveNext",
+        @"\.<(?<m>[A-Za-z_][A-Za-z0-9_]*)>d__\d+(?:<[^>]*>)?\.MoveNext",
         RegexOptions.Compiled);
 
     private static readonly string[] InfrastructurePrefixes = new[]

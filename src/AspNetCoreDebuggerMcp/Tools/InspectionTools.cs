@@ -92,6 +92,28 @@ public sealed class InspectionTools
         catch (Exception ex) { return ToolResults.Err(ex); }
     }
 
+    [McpServerTool(Name = "stack_explore")]
+    [Description("In one call: full stack + locals at every frame + a pre-rendered ASCII tree showing caller → callee with arrows. Use this instead of stacktrace_get + variables_get per frame when you want to see the whole picture at once.")]
+    public async Task<string> StackExploreAsync(
+        [Description("Thread id. Defaults to the last-stopped thread.")] int? threadId = null,
+        [Description("Maximum frames to include. Default 10.")] int? maxFrames = null,
+        [Description("Maximum locals per frame. Default 10.")] int? maxLocalsPerFrame = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var explore = await _manager.StackExploreAsync(
+                threadId, maxFrames ?? 10, maxLocalsPerFrame ?? 10, ct).ConfigureAwait(false);
+            return ToolResults.Serialize(new
+            {
+                success = true,
+                tree = explore.Tree,
+                frames = explore.Frames,
+            });
+        }
+        catch (Exception ex) { return ToolResults.Err(ex); }
+    }
+
     [McpServerTool(Name = "exception_autopsy")]
     [Description("Full exception context in one call: exception type + inner-exception chain + top stack frames + top frame's locals + source snippet around the throw. Call this when state.lastStop.reason == \"exception\".")]
     public async Task<string> AutopsyAsync(

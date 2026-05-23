@@ -145,6 +145,31 @@ public sealed class DebugSessionManager : IAsyncDisposable
         return s.AutopsyAsync(ResolveThreadIdOrThrow(threadId), topFrameCount, ct);
     }
 
+    public async Task<StackExplore> StackExploreAsync(
+        int? threadId, int maxFrames, int maxLocalsPerFrame, CancellationToken ct)
+    {
+        var s = RequireActiveSession();
+        var tid = ResolveThreadIdOrThrow(threadId);
+        var frames = await s.GetStackTraceAsync(tid, 0, maxFrames, raw: false, ct).ConfigureAwait(false);
+        var withLocals = new List<FrameWithLocals>(frames.Count);
+        foreach (var f in frames)
+        {
+            IReadOnlyList<ScopeWithVariables> scopes;
+            try
+            {
+                scopes = await s.GetScopesAsync(f.Id, depth: 1, maxChildren: maxLocalsPerFrame, ct)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // A single frame's scopes failing shouldn't kill the whole tree.
+                scopes = Array.Empty<ScopeWithVariables>();
+            }
+            withLocals.Add(new FrameWithLocals(f, scopes));
+        }
+        return new StackExplore(withLocals, StackTreeRenderer.Render(withLocals));
+    }
+
     public Task<DataBreakpoint> AddDataBreakpointAsync(
         int variablesReference, string name, string accessType, CancellationToken ct)
         => RequireActiveSession().AddDataBreakpointAsync(variablesReference, name, accessType, ct);
