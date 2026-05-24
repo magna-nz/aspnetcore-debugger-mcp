@@ -22,12 +22,14 @@
     <PackageProjectUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>mcp;mcp-server;model-context-protocol;debugger;debugging;dotnet;dotnet-tool;net10;csharp;aspnetcore;netcoredbg;dap;debug-adapter-protocol;ai;ai-agent;claude;cursor;llm;breakpoints;inspection;exception;hang;deadlock</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="" />
+    <None Include="icon.png" Pack="true" PackagePath="" />
   </ItemGroup>
 
   <ItemGroup>
