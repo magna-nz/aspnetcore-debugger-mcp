@@ -65,6 +65,30 @@ with variables — without you setting any breakpoint manually.
 > the null check on line 65 only checks `cart` itself, not `cart.Items`. Two fix options:
 > initialise `Items = []` in the `Cart` constructor, or use `cart.Items ?? []` on line 67.
 
+### Trace a request through the call chain
+
+**You**
+
+> Hit `GET /order/42` and show me which methods get called and the arguments at each one — I
+> don't want to set breakpoints by hand.
+
+**Claude**
+
+> I'll instrument your order pipeline (Controller → Service → Repository → SqlClient) and fire
+> the request. The instrumentation auto-resumes after each capture, so your code runs at
+> near-normal speed.
+>
+> ```
+> [+  679ms] → OrderController.GetOrder()       id=42, data=null
+> [+  711ms] --→ OrderService.LookupOrder()     id=42, raw=null, enriched=null
+> [+  735ms] ----→ OrderRepository.FetchById()  id=42
+> [+  759ms] ------→ SqlClient.ExecuteQuery()   sql="SELECT * FROM orders WHERE id = 42"
+> [+  783ms] ----→ EnrichmentService.Enrich()   raw="rows(sql=…)"
+> ```
+>
+> Every line is one real method entry with the actual arguments at that moment. The arrows
+> show call depth. The request finished with 200 — no manual breakpoints, no pauses.
+
 [See 5 more →](docs/examples.md)
 
 ## How it works

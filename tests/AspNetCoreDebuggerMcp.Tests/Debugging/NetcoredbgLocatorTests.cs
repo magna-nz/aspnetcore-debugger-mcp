@@ -98,4 +98,67 @@ public class NetcoredbgLocatorTests
         var rid = NetcoredbgLocator.CurrentRid();
         Assert.Matches(@"^(win|osx|linux)-(x64|arm64)$", rid);
     }
+
+    // ---- TryLocateCore: returns source identifier for diagnostics --------------
+
+    [Fact]
+    public void TryLocateCore_EnvVar_ReportsEnvironmentVariableSource()
+    {
+        var result = NetcoredbgLocator.TryLocateCore(
+            envPath: "/custom/netcoredbg",
+            baseDirectory: "/tool",
+            rid: "osx-arm64",
+            isWindows: false,
+            pathEnv: "/usr/bin",
+            fileExists: p => p == "/custom/netcoredbg");
+
+        Assert.NotNull(result);
+        Assert.Equal(NetcoredbgSource.EnvironmentVariable, result.Source);
+        Assert.Equal("/custom/netcoredbg", result.Path);
+    }
+
+    [Fact]
+    public void TryLocateCore_Bundled_ReportsBundledSource()
+    {
+        var result = NetcoredbgLocator.TryLocateCore(
+            envPath: null,
+            baseDirectory: "/tool",
+            rid: "linux-x64",
+            isWindows: false,
+            pathEnv: "",
+            fileExists: p => p == "/tool/runtimes/linux-x64/native/netcoredbg");
+
+        Assert.NotNull(result);
+        Assert.Equal(NetcoredbgSource.Bundled, result.Source);
+    }
+
+    [Fact]
+    public void TryLocateCore_OnPath_ReportsOnPathSource()
+    {
+        var result = NetcoredbgLocator.TryLocateCore(
+            envPath: null,
+            baseDirectory: "/tool",
+            rid: "osx-arm64",
+            isWindows: false,
+            pathEnv: "/usr/local/bin:/usr/bin",
+            fileExists: p => p == "/usr/local/bin/netcoredbg");
+
+        Assert.NotNull(result);
+        Assert.Equal(NetcoredbgSource.OnPath, result.Source);
+        Assert.Equal("/usr/local/bin/netcoredbg", result.Path);
+    }
+
+    [Fact]
+    public void TryLocateCore_ReturnsNull_WhenNothingFound()
+    {
+        var result = NetcoredbgLocator.TryLocateCore(
+            envPath: null,
+            baseDirectory: "/tool",
+            rid: "osx-arm64",
+            isWindows: false,
+            pathEnv: "/usr/bin",
+            fileExists: _ => false);
+
+        Assert.Null(result);
+    }
 }
