@@ -7,11 +7,15 @@ git clone https://github.com/magna-nz/aspnetcore-debugger-mcp.git
 cd aspnetcore-debugger-mcp
 dotnet build
 dotnet test
-NETCOREDBG_PATH=/path/to/netcoredbg dotnet run --project src/AspNetCoreDebuggerMcp
+
+# Fetch bundled netcoredbg binaries (one-time per checkout, ~30s) so the tool
+# can run end-to-end against a real target.
+bash scripts/fetch-netcoredbg-binaries.sh
+dotnet run --project src/AspNetCoreDebuggerMcp
 ```
 
-Requires .NET 10 SDK + `netcoredbg` on your machine (see [Install](install.md) and
-[macOS arm64 build](macos-arm64.md)).
+Requires .NET 10 SDK. The unit tests don't need netcoredbg (locator resolution is mocked); only
+end-to-end runs do.
 
 ## Project layout
 
@@ -34,7 +38,11 @@ tests/AspNetCoreDebuggerMcp.Tests/    # 80+ xUnit unit tests
 ├── ci.yml                  # Linux + macOS build/test/pack on every push and PR
 └── release.yml             # On GitHub Release published: pack + attach + push to NuGet
 scripts/
-└── build-netcoredbg-macos-arm64.sh    # Builds netcoredbg natively for Apple Silicon
+├── fetch-netcoredbg-binaries.sh        # Downloads bundled netcoredbg for all 5 RIDs (CI runs this)
+├── package-netcoredbg-osx-arm64.sh     # Packages a local arm64 build into a Samsung-layout tarball
+├── build-netcoredbg-macos-arm64.sh     # Builds netcoredbg natively for Apple Silicon (for the bundled binary)
+└── smoke-test-bundled-binary.sh        # E2E check: bundled netcoredbg speaks DAP against SampleWebApi
+tests/fixtures/SampleWebApi/            # Tiny ASP.NET Core 10 web API used by the smoke test
 ```
 
 ## Architecture in one sentence
@@ -51,15 +59,16 @@ The repository's end-to-end demos live in the developer's local job dir during d
 unit tests are the canonical "this works" signal. To exercise the full pipeline manually:
 
 ```bash
-# 1. Build a tiny ASP.NET Core test app
-dotnet new web -o /tmp/Demo
-# (write a small Program.cs handler)
+# 1. Stage the bundled netcoredbg binaries (one-time)
+bash scripts/fetch-netcoredbg-binaries.sh
 
-# 2. Run the MCP server pointing at netcoredbg
-NETCOREDBG_PATH=~/projects/netcoredbg-src/bin/netcoredbg \
-  dotnet run --project src/AspNetCoreDebuggerMcp
+# 2. Verify the bundled binary works end-to-end
+bash scripts/smoke-test-bundled-binary.sh
 
-# 3. From an MCP client (or a script), call debug_launch / breakpoint_set / etc.
+# 3. Run the MCP server (no NETCOREDBG_PATH needed — it picks the bundled binary)
+dotnet run --project src/AspNetCoreDebuggerMcp
+
+# 4. From an MCP client (or a script), call debug_launch / breakpoint_set / etc.
 ```
 
 ## Pull requests

@@ -53,4 +53,4 @@ on the stack right now.
 | Setting a breakpoint on a function name doesn't catch it | Use the exact fully-qualified name. For generic methods, include the type parameter (`Foo``1.Bar`). |
 | The trace shows everything at the same depth | Increase the *frames per event* setting so each captured stack reaches your other traced methods. |
 | Variable values are `null` when you expect data | Your breakpoint may have stopped *before* the variable was assigned — check the source snippet that comes back with the stop. |
-| The server shows as disconnected in `/mcp` | The `NETCOREDBG_PATH` env var isn't pointing at the binary. Test it: `NETCOREDBG_PATH=… aspnetcore-debugger-mcp` should start in a regular shell. |
+| The server shows as disconnected in `/mcp` | The `aspnetcore-debugger-mcp` binary isn't on `PATH`. Run `aspnetcore-debugger-mcp` directly in a regular shell — it should start and idle. The bundled `netcoredbg` is resolved automatically. |

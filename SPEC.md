@@ -63,6 +63,23 @@ target .NET process
 - Linux and Windows are expected to work afterward with little extra effort (netcoredbg ships
   prebuilt binaries for both).
 
+## Bundled netcoredbg
+
+The NuGet package ships prebuilt netcoredbg binaries for five RIDs:
+`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`. They live in the package under
+`runtimes/<rid>/native/netcoredbg[.exe]`. At startup the tool resolves the bundled binary by
+detecting the host RID (via `RuntimeInformation` OS + `ProcessArchitecture`).
+
+Resolution order:
+1. `NETCOREDBG_PATH` env var — escape hatch for custom builds
+2. Bundled binary at `<AppContext.BaseDirectory>/runtimes/<rid>/native/netcoredbg[.exe]`
+3. `netcoredbg` on PATH
+4. Throw with a clear error
+
+The netcoredbg version is pinned (Samsung release tag); bumps are deliberate. The Samsung-prebuilt
+RIDs (x64s + linux-arm64) come from the official release; `osx-arm64` is our own build, uploaded
+as a release asset because Samsung does not ship one.
+
 ## Tools
 
 ### Session

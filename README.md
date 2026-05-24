@@ -85,36 +85,34 @@ target .NET process
 A protocol bridge with agent-friendly composites on top — `exception_autopsy`, `stack_explore`,
 `hang_analyze`, and the trace tools — that bundle multiple DAP requests into a single tool call.
 
-## Use it in 4 steps
+## Use it in 3 steps
 
-1. **Install prerequisites** — .NET 10 SDK + `netcoredbg` ([prebuilt for Linux/Win/Intel macOS](https://github.com/Samsung/netcoredbg/releases) · [build for macOS arm64](docs/macos-arm64.md))
-2. **Install the tool** — `dotnet tool install -g AspNetCoreDebuggerMcp --prerelease`
-3. **Register with Claude** — either the quick CLI command:
+1. **Install the tool** — needs the [.NET 10 SDK](https://dotnet.microsoft.com/download).
    ```bash
-   claude mcp add aspnetcore-debugger \
-     -e NETCOREDBG_PATH=/path/to/netcoredbg \
-     -- aspnetcore-debugger-mcp
+   dotnet tool install -g AspNetCoreDebuggerMcp --prerelease
+   ```
+   The package bundles prebuilt `netcoredbg` for `linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, and `osx-arm64` — no separate install needed.
+2. **Register with Claude** — either the quick CLI command:
+   ```bash
+   claude mcp add aspnetcore-debugger -- aspnetcore-debugger-mcp
    ```
    …or edit `.mcp.json` (project-scoped) / `~/.claude.json` (global) / `claude_desktop_config.json` (Claude Desktop) directly:
    ```json
    {
      "mcpServers": {
        "aspnetcore-debugger": {
-         "command": "aspnetcore-debugger-mcp",
-         "env": {
-           "NETCOREDBG_PATH": "/absolute/path/to/netcoredbg"
-         }
+         "command": "aspnetcore-debugger-mcp"
        }
      }
    }
    ```
-4. **Just chat with Claude.** `/mcp` confirms it's connected. From there, describe what you want — *"why does this endpoint return null"* — and the agent picks the right tools.
+3. **Just chat with Claude.** `/mcp` confirms it's connected. From there, describe what you want — *"why does this endpoint return null"* — and the agent picks the right tools.
 
 [Full install + troubleshooting →](docs/install.md)
 
 ## Docs
 
-- **[Install & configure](docs/install.md)** — 4 steps, both Claude Code & Desktop, troubleshooting
+- **[Install & configure](docs/install.md)** — 3 steps, both Claude Code & Desktop, troubleshooting
 - **[What you can do with it](docs/examples.md)** — 7 things you can ask Claude to do for you
 - **[Full tool reference](docs/tools.md)** — every parameter on every tool
 - **[Known limits](docs/limits.md)** — when *not* to use this tool, adapter & tracing limits

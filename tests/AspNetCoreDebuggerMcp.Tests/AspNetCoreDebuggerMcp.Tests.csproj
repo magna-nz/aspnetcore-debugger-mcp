@@ -20,6 +20,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AspNetCoreDebuggerMcp\AspNetCoreDebuggerMcp.csproj" />
+    <!-- Build SampleWebApi for the integration test (E2E debug session). Don't link its
+         output assembly into the test process — we only need its DLL on disk. -->
+    <ProjectReference Include="..\fixtures\SampleWebApi\SampleWebApi.csproj">
+      <Private>false</Private>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,11 @@
-# macOS Apple Silicon — building netcoredbg
+# macOS Apple Silicon — building netcoredbg (advanced)
 
-Samsung doesn't publish an arm64 macOS prebuilt of netcoredbg. The repo includes a script that
-builds it from source.
+**You don't need this for normal use** — the AspNetCoreDebuggerMcp NuGet package bundles a prebuilt
+arm64 macOS netcoredbg binary that the tool resolves automatically. This page is only relevant if
+you want to build your own (e.g. to track a newer Samsung release than what we ship, or for development).
+
+Samsung doesn't publish an arm64 macOS prebuilt of netcoredbg, so the bundled binary is our own
+build. This repo includes the same script we use to produce it.
 
 ## Prerequisites
 
@@ -43,12 +47,12 @@ The validated-on-arm64 functionality includes: launch, attach, line/function/exc
 breakpoints (with conditions, hit counts, logpoints), step in/over/out, threads, stack traces,
 scopes, variables, evaluate, setExpression, exceptionInfo, output events.
 
-## Why a script instead of a prebuilt binary in this repo?
+## How this is distributed
 
-Distributing a prebuilt unsigned binary in a Git repo brings up signing / notarization /
-gatekeeper friction on Apple Silicon. The build script is small, deterministic, and uses your
-own toolchain — much cleaner than shipping bytes someone else has to trust.
+We run this build script once per netcoredbg release, package the result into a tarball matching
+Samsung's official tarball layout (`scripts/package-netcoredbg-osx-arm64.sh`), and upload it as a
+GitHub release asset on a `vendor-netcoredbg-<version>` tag. The release workflow's
+`scripts/fetch-netcoredbg-binaries.sh` pulls this tarball along with the four Samsung-prebuilt
+RIDs, and `dotnet pack` includes them all under `runtimes/<rid>/native/` in the NuGet package.
 
-If we ever need a quicker install path, the right move is to build the netcoredbg arm64 binary
-in CI and attach it to GitHub Releases — then the MCP server's auto-discover code can fall back
-to a downloaded binary. Not done yet; happy to add it if it's annoying enough.
+End users get the bundled binary automatically — they never have to run this script.

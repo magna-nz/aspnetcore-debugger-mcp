@@ -22,6 +22,9 @@ jobs:
           dotnet-version: '10.0.x'
           dotnet-quality: 'ga'
 
+      - name: Fetch bundled netcoredbg binaries
+        run: bash scripts/fetch-netcoredbg-binaries.sh
+
       - name: Restore
         run: dotnet restore
 
