@@ -54,14 +54,13 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- ALL 5 WAVES COMPLETE on branch `feature/MAG-39-debugger-mcp`. Linear ticket: MAG-39.
-- 22 MCP tools live, 44 unit tests passing, end-to-end smoke for every wave passes, NuGet
-  package builds, README done, CI defined.
-- Awaiting decision on raising the PR.
+- MAG-46 (NuGet metadata + discoverability) complete. PR #14 open, awaiting merge.
+- Branch: `feature/MAG-46-nuget-metadata-discoverability`
 
 ## What's next
-1. Raise the PR (one branch, one PR, all 5 waves) — needs user confirmation.
-2. Decide whether to publish the NuGet package (and to what feed) — out of scope for the PR.
+1. Merge PR #14 once approved.
+2. Mark MAG-46 done after merge.
+3. Decide whether to publish the NuGet package (and to what feed).
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.

@@ -16,13 +16,14 @@
 
     <!-- NuGet metadata -->
     <Authors>magna-nz</Authors>
-    <Description>MIT-licensed Model Context Protocol server that gives AI agents interactive .NET debugging by wrapping netcoredbg (Samsung) over the Debug Adapter Protocol. 22 tools across session management, breakpoints, execution, inspection, evaluation, exception analysis, hang detection, and process output.</Description>
+    <Title>ASP.NET Core Debugger — MCP Server for AI Agents</Title>
+    <Description>MIT-licensed MCP (Model Context Protocol) server that gives AI agents (Claude, Cursor, Copilot, etc.) interactive .NET / ASP.NET Core debugging. Wraps Samsung's netcoredbg over the Debug Adapter Protocol (DAP). 26 tools: launch/attach, breakpoints (line, function, exception, data), stepping, thread inspection, stack traces, expression evaluation, variable mutation, exception autopsy, hang/deadlock analysis, server-side request tracing, and process output capture. Install as a .NET global tool and point any MCP-compatible AI at your running app.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/magna-nz/aspnetcore-debugger-mcp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>mcp;mcp-server;debugger;dotnet;netcoredbg;dap;ai;ai-agent;debugging;breakpoints;aspnetcore</PackageTags>
+    <PackageTags>mcp;mcp-server;model-context-protocol;debugger;debugging;dotnet;dotnet-tool;net10;csharp;aspnetcore;netcoredbg;dap;debug-adapter-protocol;ai;ai-agent;claude;cursor;llm;breakpoints;inspection;exception;hang;deadlock</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
