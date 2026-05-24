@@ -54,13 +54,17 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- MAG-46 (NuGet metadata + discoverability) complete. PR #14 open, awaiting merge.
-- Branch: `feature/MAG-46-nuget-metadata-discoverability`
+- MAG-46 (NuGet metadata + discoverability) DONE. PR #14 merged.
+- MAG-47 (Bundle netcoredbg binaries) DONE. PR #16 merged. Release v0.1.3-preview
+  pushed to NuGet.org (validation pipeline ~5-30min after push).
+- Submitted to mcp.so (pending review) and punkpeye/awesome-mcp-servers PR #6823 (open).
 
 ## What's next
-1. Merge PR #14 once approved.
-2. Mark MAG-46 done after merge.
-3. Decide whether to publish the NuGet package (and to what feed).
+1. Wait for NuGet validation of 0.1.3-preview to complete.
+2. Verify `dotnet tool install -g AspNetCoreDebuggerMcp --prerelease` works
+   without `NETCOREDBG_PATH` on a clean machine.
+3. Optionally: jump to 0.2.0-preview for the next feature release to signal
+   the bundling change more clearly (current 0.1.3 is patch-level naming).
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.
