@@ -52,6 +52,9 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $v"
 
+      - name: Fetch bundled netcoredbg binaries
+        run: bash scripts/fetch-netcoredbg-binaries.sh
+
       - name: Restore
         run: dotnet restore
 

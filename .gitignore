@@ -19,6 +19,10 @@ artifacts/
 .netcoredbg-build/
 external/netcoredbg/build/
 
+# Bundled netcoredbg binaries — populated by scripts/fetch-netcoredbg-binaries.sh
+# (CI runs this before `dotnet pack`). Out of git to keep repo light.
+src/AspNetCoreDebuggerMcp/runtimes/
+
 # OS
 .DS_Store
 
