@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **An MIT-licensed [Model Context Protocol](https://modelcontextprotocol.io/) server that lets an
-AI agent (Claude, etc.) debug your .NET / ASP.NET Core app — conversationally.**
+AI agent (Claude, etc.) debug your .NET / ASP.NET Core app.**
 
 Instead of *"I think the bug is around line 42, try this"*, the agent runs your code, pauses it,
 reads the actual runtime values, mutates state to test a fix, and answers grounded in what it
@@ -17,24 +17,55 @@ actually saw.
 autopsy, hang analysis, and **server-side request tracing** that captures the full call chain
 with variables — without you setting any breakpoint manually.
 
-## A taste — real output
+## See it in action
 
-You tell Claude *"trace what `GET /order/42` does"* and the agent traces 5 methods, hits the
-endpoint, and returns:
+### Why is my endpoint returning null?
 
-```
-[+  679ms] → OrderController.GetOrder()       id=42, data=null
-[+  711ms] --→ OrderService.LookupOrder()     id=42, raw=null, enriched=null
-[+  735ms] ----→ OrderRepository.FetchById()  id=42
-[+  759ms] ------→ SqlClient.ExecuteQuery()   sql="SELECT * FROM orders WHERE id = 42"
-[+  783ms] ----→ EnrichmentService.Enrich()   raw="rows(sql=SELECT * FROM orders WHERE id …"
-```
+**You**
 
-— Controller → Service → Repository → SqlClient (4 levels), with `Enrich` correctly shown as a
-sibling of the Repository call at depth 2. Each line is one captured method entry with its
-actual locals. No breakpoints set manually.
+> `GET /users/42` is returning null. Can you figure out why?
 
-[See 6 more worked examples →](docs/examples.md)
+**Claude**
+
+> I'll run your app and stop inside the handler when the request hits.
+>
+> Walked through `UserController.GetUser` → `UserService.GetUserAsync` →
+> `UserRepository.GetByIdAsync`. Here's the query the repo is issuing against the DB:
+>
+> ```
+> SELECT * FROM users WHERE id = '42'
+> ```
+>
+> That's the bug — the `id` is being string-interpolated into the SQL, but the `id` column is
+> an `int`. Postgres returns zero rows for that comparison. Fix is to parameterise the query
+> and pass `id` as an int.
+
+### Why did my app throw?
+
+**You**
+
+> My `/checkout` endpoint throws a `NullReferenceException` somewhere. Find it.
+
+**Claude**
+
+> I'll set a break on unhandled exceptions and trigger the flow. Caught it.
+>
+> ```
+> Thrown at OrderService.cs:67
+>
+>   65: if (cart == null) throw new ArgumentNullException(nameof(cart));
+>   66: var total = 0m;
+> → 67: foreach (var item in cart.Items) total += item.Price;
+>
+> At the throw:
+>   cart.Items = null
+> ```
+>
+> `LoadCart(userId)` on line 62 returned a `Cart` whose `Items` is `null` for new users — and
+> the null check on line 65 only guards `cart`, not `cart.Items`. Two fix options:
+> initialise `Items = []` in the `Cart` constructor, or use `cart.Items ?? []` on line 67.
+
+[See 5 more →](docs/examples.md)
 
 ## How it works
 
@@ -80,18 +111,6 @@ A protocol bridge with agent-friendly composites on top — `exception_autopsy`,
 4. **Just chat with Claude.** `/mcp` confirms it's connected. From there, describe what you want — *"why does this endpoint return null"* — and the agent picks the right tools.
 
 [Full install + troubleshooting →](docs/install.md)
-
-## Tools at a glance
-
-| Category | Tools |
-|---|---|
-| **Session** | launch / attach / disconnect / state |
-| **Breakpoints** | line (conditional/hit-count/logpoint), function, exception, data, remove, list |
-| **Execution** | continue / pause / step / blocking wait-for-stop |
-| **Inspection** | threads / stack / variables / evaluate / set-variable / **`stack_explore` composite** |
-| **Diagnostics** | **`exception_autopsy`** · **`hang_analyze`** · **`trace_start/get/stop`** · stdout drain |
-
-26 tools total. [Full reference with parameters →](docs/tools.md)
 
 ## Docs
 
