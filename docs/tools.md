@@ -59,6 +59,7 @@ result that's ready to drop into a reply.
 | `trace_get` | Read the trace events captured since you started, plus a rendered timeline showing each call with `→` and depth-based indentation. |
 | `trace_stop` | Stop the trace and clear its watch points. |
 | `process_read_output` | Drain the app's stdout/stderr since the last call. Captures whatever `Console.WriteLine`, `ILogger`, or ASP.NET Core's request logging produces. |
+| `debugger_health` | Self-diagnostic. Reports your platform, RID, the resolved netcoredbg path, where it came from (bundled / env var / PATH), and the `--version` banner. Call this first if something looks off, instead of starting a real debug session to find out. |
 
 ## Notes on tool behaviour
 

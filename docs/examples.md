@@ -1,9 +1,10 @@
 # What you can do with it
 
-Seven everyday scenarios. Each shows what you'd ask Claude in plain English and what Claude
+Eight everyday scenarios. Each shows what you'd ask Claude in plain English and what Claude
 might come back with. The wording is illustrative — the actual response depends on your code —
 but the **shape** of the conversation is real, and the values shown come from real runs.
 
+- [Is the debugger set up correctly?](#is-the-debugger-set-up-correctly)
 - [Why is my endpoint returning the wrong data?](#why-is-my-endpoint-returning-the-wrong-data)
 - [Try a fix without editing my code](#try-a-fix-without-editing-my-code)
 - [Why did my app throw this exception?](#why-did-my-app-throw-this-exception)
@@ -11,6 +12,30 @@ but the **shape** of the conversation is real, and the values shown come from re
 - [Where am I right now in the call stack?](#where-am-i-right-now-in-the-call-stack)
 - [Why is my app hung?](#why-is-my-app-hung)
 - [Show me what the server is logging](#show-me-what-the-server-is-logging)
+
+---
+
+## Is the debugger set up correctly?
+
+**You**
+
+> Before we start — is the debugger ready? I'm not sure if it picked up the right binary on
+> my Mac.
+
+**Claude**
+
+> I'll check.
+>
+> Yes — the bundled netcoredbg is healthy on your machine.
+>
+> - **Platform:** macOS, arm64 (RID `osx-arm64`)
+> - **Binary:** the one that shipped with the NuGet package — no `NETCOREDBG_PATH`
+>   override is set, and you're not falling back to a binary on `PATH`
+> - **Version:** `NET Core debugger 3.1.3-1 (Release)`
+>
+> You're good to launch a debug session whenever you want.
+
+<sub>*(under the hood: one call to `debugger_health` — reports RID, resolved netcoredbg path, source (bundled / env var / PATH), and `--version`)*</sub>
 
 ---
 
