@@ -54,13 +54,14 @@
   Roslyn code navigation is out of scope.
 
 ## Where we left off
-- MAG-46 (NuGet metadata + discoverability) complete. PR #14 open, awaiting merge.
-- Branch: `feature/MAG-46-nuget-metadata-discoverability`
+- MAG-46 DONE. PR #14 merged to main.
+- Submitted to mcp.so (awaiting review) and punkpeye/awesome-mcp-servers PR #6823 (open).
 
 ## What's next
-1. Merge PR #14 once approved.
-2. Mark MAG-46 done after merge.
-3. Decide whether to publish the NuGet package (and to what feed).
+1. Publish NuGet package to NuGet.org (needs NUGET_API_KEY secret + GitHub release with correct tag format e.g. `v0.1.1-preview`).
+2. Run `dotnet tool search mcp` once published to verify indexing.
+3. Add GitHub social preview image (Settings → Social preview).
+4. Check mcp.so listing once approved.
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.
