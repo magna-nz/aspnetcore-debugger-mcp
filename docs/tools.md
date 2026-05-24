@@ -8,7 +8,7 @@ want precision.
 
 | Tool | What it does |
 |---|---|
-| `debug_launch` | Start your .NET app under the debugger. Optionally pause at entry. |
+| `debug_launch` | Start your .NET app under the debugger. Optionally pause at entry. Accepts an `env` map for environment variables — `ASPNETCORE_ENVIRONMENT` to switch between `Development`/`Staging`/`Production` (the matching `appsettings.{Env}.json` auto-loads), or anything in `appsettings.json` via the standard `Section__Key` form. Session-scoped — no files touched. |
 | `debug_attach` | Attach to a .NET app that's already running, by process id. |
 | `debug_disconnect` | Stop the debug session and shut down the app. |
 | `debug_state` | What state are we in? Running, paused, or terminated; current process id; what the last stop was. |

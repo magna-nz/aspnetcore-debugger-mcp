@@ -26,11 +26,12 @@ public sealed class SessionTools
         [Description("Command-line arguments to pass to the program.")] string[]? args = null,
         [Description("Working directory for the program (defaults to the program's directory).")] string? cwd = null,
         [Description("If true, the program pauses at entry instead of running until the first breakpoint.")] bool stopAtEntry = false,
+        [Description("Environment variables to set on the debuggee. ASP.NET Core picks these up at startup — use ASPNETCORE_ENVIRONMENT to switch between Development/Staging/Production (the matching appsettings.{Env}.json auto-loads), or override anything in appsettings via the standard double-underscore syntax (e.g. ConnectionStrings__Default). These are session-scoped — no files are edited.")] Dictionary<string, string>? env = null,
         CancellationToken ct = default)
     {
         try
         {
-            var snap = await _manager.LaunchAsync(program, args, cwd, stopAtEntry, ct).ConfigureAwait(false);
+            var snap = await _manager.LaunchAsync(program, args, cwd, stopAtEntry, env, ct).ConfigureAwait(false);
             return Ok(snap);
         }
         catch (Exception ex) { return Err(ex); }

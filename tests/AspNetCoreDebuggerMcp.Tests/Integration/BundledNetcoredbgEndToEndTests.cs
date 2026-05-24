@@ -38,6 +38,7 @@ public class BundledNetcoredbgEndToEndTests
             args: new[] { "--urls", baseUrl },
             cwd: Path.GetDirectoryName(webApiDll),
             stopAtEntry: false,
+            env: null,
             cts.Token);
 
         // Line 6 of Program.cs is inside the GET /users handler lambda body
@@ -64,6 +65,44 @@ public class BundledNetcoredbgEndToEndTests
         var response = await requestTask;
         Assert.True(response.IsSuccessStatusCode,
             $"Expected 2xx, got {(int)response.StatusCode}: {response.ReasonPhrase}");
+
+        await session.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task DebugSession_PassesEnvironmentVariables_ToDebuggee()
+    {
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;  // skip — see other test
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        await using var session = await DebugSession.LaunchAsync(
+            netcoredbgPath: bundled,
+            program: webApiDll,
+            args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll),
+            stopAtEntry: false,
+            env: new Dictionary<string, string>
+            {
+                ["ASPNETCORE_ENVIRONMENT"] = "Production",
+                ["SAMPLE_VAR"] = "hello-from-test",
+            },
+            cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var json = await http.GetStringAsync($"{baseUrl}/health", cts.Token);
+
+        // /health echoes the env var and ASP.NET Core hosting environment, so a successful
+        // probe proves the env dict reached netcoredbg → debuggee process.
+        Assert.Contains("\"environment\":\"Production\"", json);
+        Assert.Contains("\"sampleVar\":\"hello-from-test\"", json);
 
         await session.DisconnectAsync(cts.Token);
     }
