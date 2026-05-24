@@ -29,16 +29,16 @@ with variables — without you setting any breakpoint manually.
 
 > I'll run your app and stop inside the handler when the request hits.
 >
-> Walked through `UserController.GetUser` → `UserService.GetUserAsync` →
-> `UserRepository.GetByIdAsync`. Here's the query the repo is issuing against the DB:
+> I followed the call from the controller into the user service and then into the repository.
+> Here's the query the repo is issuing against the DB:
 >
 > ```
 > SELECT * FROM users WHERE id = '42'
 > ```
 >
-> That's the bug — the `id` is being string-interpolated into the SQL, but the `id` column is
-> an `int`. Postgres returns zero rows for that comparison. Fix is to parameterise the query
-> and pass `id` as an int.
+> That's the bug — the `id` is being dropped into the SQL as text instead of as a value, but
+> the `id` column is an `int`. Postgres returns zero rows for that comparison. Fix is to use a
+> parameter for the id and pass it as an int.
 
 ### Why did my app throw?
 
@@ -48,7 +48,7 @@ with variables — without you setting any breakpoint manually.
 
 **Claude**
 
-> I'll set a break on unhandled exceptions and trigger the flow. Caught it.
+> I'll catch any unhandled exception and run through your checkout flow. Caught it.
 >
 > ```
 > Thrown at OrderService.cs:67
@@ -62,7 +62,7 @@ with variables — without you setting any breakpoint manually.
 > ```
 >
 > `LoadCart(userId)` on line 62 returned a `Cart` whose `Items` is `null` for new users — and
-> the null check on line 65 only guards `cart`, not `cart.Items`. Two fix options:
+> the null check on line 65 only checks `cart` itself, not `cart.Items`. Two fix options:
 > initialise `Items = []` in the `Cart` constructor, or use `cart.Items ?? []` on line 67.
 
 [See 5 more →](docs/examples.md)
