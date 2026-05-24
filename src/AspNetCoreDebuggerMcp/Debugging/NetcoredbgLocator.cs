@@ -1,44 +1,70 @@
+using System.Runtime.InteropServices;
+
 namespace AspNetCoreDebuggerMcp.Debugging;
 
 /// Finds the netcoredbg executable on disk.
-/// Resolution order: NETCOREDBG_PATH env var → bundled-next-to-assembly → on PATH.
+/// Resolution order:
+///   1. NETCOREDBG_PATH env var
+///   2. Bundled binary at runtimes/&lt;rid&gt;/native/netcoredbg[.exe]
+///   3. On PATH
 internal static class NetcoredbgLocator
 {
     public const string EnvironmentVariable = "NETCOREDBG_PATH";
 
-    public static string Locate()
+    public static string Locate() =>
+        LocateCore(
+            envPath: Environment.GetEnvironmentVariable(EnvironmentVariable),
+            baseDirectory: AppContext.BaseDirectory,
+            rid: CurrentRid(),
+            isWindows: RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
+            pathEnv: Environment.GetEnvironmentVariable("PATH") ?? "",
+            fileExists: File.Exists);
+
+    internal static string LocateCore(
+        string? envPath,
+        string baseDirectory,
+        string rid,
+        bool isWindows,
+        string pathEnv,
+        Func<string, bool> fileExists)
     {
-        var envPath = Environment.GetEnvironmentVariable(EnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
+        if (!string.IsNullOrWhiteSpace(envPath) && fileExists(envPath))
             return envPath;
 
-        var baseDir = AppContext.BaseDirectory;
-        foreach (var candidate in new[]
-        {
-            Path.Combine(baseDir, "netcoredbg", "netcoredbg"),
-            Path.Combine(baseDir, "netcoredbg"),
-        })
-        {
-            if (File.Exists(candidate)) return candidate;
-        }
+        var exe = isWindows ? "netcoredbg.exe" : "netcoredbg";
+        var bundled = Path.Combine(baseDirectory, "runtimes", rid, "native", exe);
+        if (fileExists(bundled))
+            return bundled;
 
-        var onPath = FindOnPath("netcoredbg");
-        if (onPath is not null) return onPath;
-
-        throw new FileNotFoundException(
-            $"netcoredbg executable not found. Set the {EnvironmentVariable} environment variable " +
-            "to the netcoredbg binary, or place it on PATH.");
-    }
-
-    private static string? FindOnPath(string name)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in path.Split(Path.PathSeparator))
+        foreach (var dir in pathEnv.Split(Path.PathSeparator))
         {
             if (string.IsNullOrWhiteSpace(dir)) continue;
-            var full = Path.Combine(dir, name);
-            if (File.Exists(full)) return full;
+            var candidate = Path.Combine(dir, exe);
+            if (fileExists(candidate)) return candidate;
         }
-        return null;
+
+        throw new FileNotFoundException(
+            $"netcoredbg executable not found. The package should bundle a binary for RID '{rid}' " +
+            $"at runtimes/{rid}/native/{exe}. Set the {EnvironmentVariable} environment variable to " +
+            "override, or install netcoredbg on PATH.");
+    }
+
+    internal static string CurrentRid()
+    {
+        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win"
+               : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "osx"
+               : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "linux"
+               : throw new PlatformNotSupportedException(
+                   $"Unsupported OS: {RuntimeInformation.OSDescription}");
+
+        var arch = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            var a => throw new PlatformNotSupportedException(
+                $"Unsupported process architecture: {a}"),
+        };
+
+        return $"{os}-{arch}";
     }
 }
