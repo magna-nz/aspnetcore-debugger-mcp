@@ -72,14 +72,14 @@ internal sealed class DebugSession : IAsyncDisposable
 
     public static async Task<DebugSession> LaunchAsync(
         string netcoredbgPath, string program, string[]? args, string? cwd, bool stopAtEntry,
-        CancellationToken ct)
+        IReadOnlyDictionary<string, string>? env, CancellationToken ct)
     {
         var session = StartAdapter(netcoredbgPath);
         try
         {
             await session.HandshakeAsync(
                 isLaunch: true,
-                startArgs: BuildLaunchArgs(program, args, cwd, stopAtEntry), ct).ConfigureAwait(false);
+                startArgs: BuildLaunchArgs(program, args, cwd, stopAtEntry, env), ct).ConfigureAwait(false);
             return session;
         }
         catch
@@ -116,8 +116,9 @@ internal sealed class DebugSession : IAsyncDisposable
         return new DebugSession(process, client);
     }
 
-    private static Dictionary<string, object?> BuildLaunchArgs(
-        string program, string[]? args, string? cwd, bool stopAtEntry)
+    internal static Dictionary<string, object?> BuildLaunchArgs(
+        string program, string[]? args, string? cwd, bool stopAtEntry,
+        IReadOnlyDictionary<string, string>? env)
     {
         var d = new Dictionary<string, object?>
         {
@@ -127,6 +128,11 @@ internal sealed class DebugSession : IAsyncDisposable
         };
         if (args is { Length: > 0 }) d["args"] = args;
         if (!string.IsNullOrEmpty(cwd)) d["cwd"] = cwd;
+        if (env is { Count: > 0 })
+        {
+            // netcoredbg accepts the vscode-coreclr "env" object form: {"NAME": "value", ...}.
+            d["env"] = env.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
+        }
         return d;
     }
 

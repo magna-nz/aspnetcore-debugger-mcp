@@ -1,10 +1,11 @@
 # What you can do with it
 
-Eight everyday scenarios. Each shows what you'd ask Claude in plain English and what Claude
+Nine everyday scenarios. Each shows what you'd ask Claude in plain English and what Claude
 might come back with. The wording is illustrative — the actual response depends on your code —
 but the **shape** of the conversation is real, and the values shown come from real runs.
 
 - [Is the debugger set up correctly?](#is-the-debugger-set-up-correctly)
+- [Run my app in a different environment for one session](#run-my-app-in-a-different-environment-for-one-session)
 - [Why is my endpoint returning the wrong data?](#why-is-my-endpoint-returning-the-wrong-data)
 - [Try a fix without editing my code](#try-a-fix-without-editing-my-code)
 - [Why did my app throw this exception?](#why-did-my-app-throw-this-exception)
@@ -36,6 +37,42 @@ but the **shape** of the conversation is real, and the values shown come from re
 > You're good to launch a debug session whenever you want.
 
 <sub>*(under the hood: one call to `debugger_health` — reports RID, resolved netcoredbg path, source (bundled / env var / PATH), and `--version`)*</sub>
+
+---
+
+## Run my app in a different environment for one session
+
+**You**
+
+> Run my API in Production mode against the staging DB — I want to see what config it actually
+> picks up. Don't change any of my files.
+
+**Claude**
+
+> I'll launch with the env vars set so ASP.NET Core picks up `appsettings.Production.json` on top
+> of `appsettings.json`, and override the connection string in-memory only.
+>
+> Launched with:
+>
+> ```
+> ASPNETCORE_ENVIRONMENT=Production
+> ConnectionStrings__Default=Server=staging.internal;Database=app
+> ```
+>
+> Then I called your `/config-dump` endpoint:
+>
+> ```
+> Environment       : Production
+> ConnectionString  : Server=staging.internal;Database=app
+> Logging:LogLevel  : Warning           (from appsettings.Production.json)
+> FeatureFlags:Beta : false             (from appsettings.json — no Production override)
+> ```
+>
+> No files were edited — the next run reverts to whatever your shell defaults to. If you want
+> this combination saved, that's a normal edit to `appsettings.Production.json`, separate from
+> the debug session.
+
+<sub>*(under the hood: `debug_launch` with the `env` parameter — ASP.NET Core's config layering does the rest)*</sub>
 
 ---
 

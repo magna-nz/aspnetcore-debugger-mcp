@@ -23,7 +23,8 @@ public sealed class DebugSessionManager : IAsyncDisposable
     // ---- session lifecycle ----------------------------------------------------------
 
     public async Task<SessionSnapshot> LaunchAsync(
-        string program, string[]? args, string? cwd, bool stopAtEntry, CancellationToken ct)
+        string program, string[]? args, string? cwd, bool stopAtEntry,
+        IReadOnlyDictionary<string, string>? env, CancellationToken ct)
     {
         await _lifecycleGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -31,7 +32,7 @@ public sealed class DebugSessionManager : IAsyncDisposable
             EnsureNoActiveSession();
             await DisposeExistingAsync().ConfigureAwait(false);
             var path = NetcoredbgLocator.Locate();
-            _session = await DebugSession.LaunchAsync(path, program, args, cwd, stopAtEntry, ct)
+            _session = await DebugSession.LaunchAsync(path, program, args, cwd, stopAtEntry, env, ct)
                 .ConfigureAwait(false);
             return _session.Snapshot();
         }

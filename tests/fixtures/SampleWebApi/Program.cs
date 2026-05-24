@@ -7,6 +7,11 @@ app.MapGet("/users/{id:int}", (int id) =>
     return Results.Ok(new { id, name });
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "ok",
+    environment = app.Environment.EnvironmentName,
+    sampleVar = Environment.GetEnvironmentVariable("SAMPLE_VAR"),
+}));
 
 app.Run();
