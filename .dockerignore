@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/nupkg/
+**/.vs/
+**/.vscode/
+**/.idea/
+.git/
+.github/
+.claude/
+docs/
+*.md
+!README.md
+.netcoredbg-build/
+external/netcoredbg/build/
+src/AspNetCoreDebuggerMcp/runtimes/
