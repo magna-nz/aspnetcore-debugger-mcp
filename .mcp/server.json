@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.magna-nz/aspnetcore-debugger-mcp",
+  "version": "0.1.5-preview",
+  "title": "ASP.NET Core Debugger — MCP Server for AI Agents",
+  "description": "MCP server giving AI agents interactive .NET / ASP.NET Core debugging via netcoredbg + DAP.",
+  "websiteUrl": "https://github.com/magna-nz/aspnetcore-debugger-mcp",
+  "repository": {
+    "url": "https://github.com/magna-nz/aspnetcore-debugger-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "nuget",
+      "registryBaseUrl": "https://api.nuget.org/v3/index.json",
+      "identifier": "AspNetCoreDebuggerMcp",
+      "version": "0.1.5-preview",
+      "runtimeHint": "dnx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

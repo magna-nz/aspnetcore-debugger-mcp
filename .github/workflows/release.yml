@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # required to upload the .nupkg as a release asset
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -95,3 +97,69 @@ jobs:
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
+
+  publish-mcp-registry:
+    # Publishes .mcp/server.json to the Official MCP Registry after the NuGet
+    # package is live on nuget.org. The registry verifies the package's README
+    # contains `<!-- mcp-name: <name from server.json> -->`, so it can only run
+    # once the package is published and available.
+    needs: publish
+    # Mirror the same gate the NuGet push uses — no point publishing a manifest
+    # that points at a NuGet version that was never pushed.
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.push_to_nuget == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # mcp-publisher uses GitHub OIDC to prove the workflow owns io.github.magna-nz/*
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set server.json version from release tag
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' \
+            .mcp/server.json > .mcp/server.json.tmp
+          mv .mcp/server.json.tmp .mcp/server.json
+          echo "--- server.json after version rewrite ---"
+          cat .mcp/server.json
+
+      - name: Wait for NuGet package to be live
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          pkg_id_lower=$(jq -r '.packages[0].identifier' .mcp/server.json | tr '[:upper:]' '[:lower:]')
+          ver_lower=$(echo "$VERSION" | tr '[:upper:]' '[:lower:]')
+          url="https://api.nuget.org/v3-flatcontainer/${pkg_id_lower}/${ver_lower}/readme"
+          # NuGet validation typically completes in 5–30 minutes — poll for up to 30.
+          deadline=$(( $(date +%s) + 1800 ))
+          attempt=0
+          until curl -sfI "$url" >/dev/null; do
+            attempt=$((attempt + 1))
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::NuGet package $VERSION not available after 30 minutes at $url"
+              exit 1
+            fi
+            echo "[attempt $attempt] not available yet, sleeping 20s..."
+            sleep 20
+          done
+          echo "Package $VERSION is live on nuget.org."
+
+      - name: Download mcp-publisher
+        run: |
+          set -euo pipefail
+          curl -sSL -o mcp-publisher.tar.gz \
+            https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz
+          tar -xzf mcp-publisher.tar.gz
+          ./mcp-publisher --help | head -5
+
+      - name: Authenticate via GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to Official MCP Registry
+        run: ./mcp-publisher publish .mcp/server.json
