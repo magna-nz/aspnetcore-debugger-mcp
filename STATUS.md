@@ -55,16 +55,23 @@
 
 ## Where we left off
 - MAG-46 (NuGet metadata + discoverability) DONE. PR #14 merged.
-- MAG-47 (Bundle netcoredbg binaries) DONE. PR #16 merged. Release v0.1.3-preview
-  pushed to NuGet.org (validation pipeline ~5-30min after push).
+- MAG-47 (Bundle netcoredbg binaries) DONE. PR #16 merged. v0.1.3-preview on NuGet.org.
+- MAG-48 (Dockerfile for Glama submission) DONE. PR #17 merged.
+- MAG-49 (DX polish — debugger_health tool + README trace example) DONE. PR #18 merged.
+- MAG-50 (debug_launch env var support) DONE. PR #19 merged. v0.1.4-preview on NuGet.org.
+- MAG-51 (Publish to official MCP registry + automate in release.yml) DONE. PR #20 merged.
+  v0.1.5-preview live on NuGet.org AND on registry.modelcontextprotocol.io under
+  `io.github.magna-nz/aspnetcore-debugger-mcp`. release.yml now auto-publishes the
+  manifest on every NuGet push via GitHub OIDC (no PAT to rotate).
 - Submitted to mcp.so (pending review) and punkpeye/awesome-mcp-servers PR #6823 (open).
+- Glama follow-up still pending: submit at glama.ai/mcp/servers, wait for introspection,
+  add Glama score badge to punkpeye PR #6823.
 
 ## What's next
-1. Wait for NuGet validation of 0.1.3-preview to complete.
-2. Verify `dotnet tool install -g AspNetCoreDebuggerMcp --prerelease` works
-   without `NETCOREDBG_PATH` on a clean machine.
-3. Optionally: jump to 0.2.0-preview for the next feature release to signal
-   the bundling change more clearly (current 0.1.3 is patch-level naming).
+1. Glama submission (saved in auto-memory).
+2. No code work queued. Next feature/fix as it comes up.
+3. v1.0.0 bump: wait 4–8 weeks until tool surface settles and listings drive real
+   usage signal before stabilising.
 
 ## Gotchas
 - cmake 4.x: configured with `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` for old `cmake_minimum_required`.
@@ -89,3 +96,8 @@
 - process_write_input is NOT implemented in Wave 4. DAP launch mode owns the debuggee's stdin
   (netcoredbg launched it); we'd need a different launch architecture (we launch the process
   ourselves and have netcoredbg attach) to plumb stdin. Deferred — flag for a future wave.
+- csproj `<Version>` (0.1.0-preview) and `.mcp/server.json` version are decorative — release.yml
+  overrides via `/p:Version=$tag` for the pack and jq-rewrites server.json before publishing.
+  The git tag is the source of truth. Don't bump either before tagging.
+- MCP registry namespace `io.github.magna-nz/*` is owned implicitly via GitHub OIDC — no
+  account, no token, no manual claim. The workflow's `id-token: write` permission proves it.
