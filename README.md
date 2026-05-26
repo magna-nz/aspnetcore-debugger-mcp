@@ -1,21 +1,27 @@
 # ASP.NET Core Debugging MCP Server
 
+### The cross-platform .NET debugging MCP — runs on **Linux**, **macOS**, and **Windows**.
+
 <!-- mcp-name: io.github.magna-nz/aspnetcore-debugger-mcp -->
 
 [![CI](https://github.com/magna-nz/aspnetcore-debugger-mcp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/magna-nz/aspnetcore-debugger-mcp/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/vpre/AspNetCoreDebuggerMcp.svg?label=NuGet)](https://www.nuget.org/packages/AspNetCoreDebuggerMcp)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-005FBA)](https://modelcontextprotocol.io/)
+[![Platforms](https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-success)](#platforms)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**An MIT-licensed [Model Context Protocol](https://modelcontextprotocol.io/) server that lets an
-AI agent (Claude, etc.) debug your .NET / ASP.NET Core app.**
+> **MIT-licensed [MCP](https://modelcontextprotocol.io/) server that lets an AI agent (Claude, etc.) debug your .NET / ASP.NET Core app interactively.**
+>
+> ✅ **Linux** (x64, arm64) &nbsp;·&nbsp; ✅ **macOS** (Intel + Apple Silicon) &nbsp;·&nbsp; ✅ **Windows** (x64)
+>
+> netcoredbg is bundled for every platform — nothing extra to install.
 
 Instead of *"I think the bug is around line 42, try this"*, the agent runs your code, pauses it,
 reads the actual runtime values, mutates state to test a fix, and answers grounded in what it
 actually saw.
 
-26 tools across launching, breakpoints, stepping, inspection, expression evaluation, exception
+27 tools across launching, breakpoints, stepping, inspection, expression evaluation, exception
 autopsy, hang analysis, and **server-side request tracing** that captures the full call chain
 with variables — without you setting any breakpoint manually.
 
@@ -135,6 +141,49 @@ A protocol bridge with agent-friendly composites on top — `exception_autopsy`,
 3. **Just chat with Claude.** `/mcp` confirms it's connected. From there, describe what you want — *"why does this endpoint return null"* — and the agent picks the right tools.
 
 [Full install + troubleshooting →](docs/install.md)
+
+## Platforms
+
+Bundled `netcoredbg` binary is selected at runtime — no per-platform install dance.
+
+| OS | Architectures | Status |
+|---|---|---|
+| **Linux** | x64, arm64 | ✅ Supported (Samsung prebuilt) |
+| **macOS** | Intel (x64), Apple Silicon (arm64) | ✅ Supported (arm64 built by us, since Samsung doesn't ship one) |
+| **Windows** | x64 | ✅ Supported (Samsung prebuilt) |
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download) on the host. The MCP server itself
+is a cross-platform .NET global tool — same install command everywhere.
+
+## Tools (27)
+
+| Category | Tools | What it's for |
+|---|---|---|
+| **Session** | `debug_launch`, `debug_attach`, `debug_disconnect`, `debug_state` | Start, attach to, or stop a debug session |
+| **Execution** | `debug_continue`, `debug_pause`, `debug_step`, `breakpoint_wait` | Drive the debuggee and wait for it to stop |
+| **Breakpoints** | `breakpoint_set`, `breakpoint_set_function`, `breakpoint_set_exception`, `breakpoint_set_data`, `breakpoint_remove`, `breakpoint_list` | Line, function, exception, and data breakpoints |
+| **Inspection** | `threads_list`, `stacktrace_get`, `variables_get`, `variables_set`, `evaluate`, `stack_explore` | Examine and mutate program state |
+| **Exception Autopsy** | `exception_autopsy` | One call: exception chain + top frames + locals + source snippet |
+| **Hang / Deadlock** | `hang_analyze` | Auto-pause, classify each thread's blocking pattern (Monitor / Task / Semaphore / async / …) |
+| **Request Tracing** | `trace_start`, `trace_get`, `trace_stop` | Server-side request tracing — auto-instrument a call chain and capture arguments at every entry |
+| **Process I/O** | `process_read_output` | Drain the debuggee's stdout/stderr |
+| **Health** | `debugger_health` | Quick check that netcoredbg loaded and the bundled binary is reachable |
+
+[Full tool reference with parameters →](docs/tools.md)
+
+## How this compares
+
+| Project | License | Platforms | Approach | .NET |
+|---|---|---|---|---|
+| **aspnetcore-debugger-mcp** *(this)* | **MIT** | **Linux + macOS + Windows** | netcoredbg via DAP, ASP.NET-focused composites (request tracing, hang analysis) | Native, .NET 10 |
+| [debug-mcp](https://github.com/jkolo/debug-mcp) | AGPL-3.0 | Linux only (Win/macOS planned) | ICorDebug direct, Roslyn code nav | Native, .NET 10 |
+| [mcp-debugger](https://github.com/debugmcp/mcp-debugger) | — | Cross-platform | DAP | Via external debugger |
+| [dap-mcp](https://github.com/KashunCheng/dap_mcp) | — | Cross-platform | DAP | Via external debugger |
+| [LLDB MCP](https://lldb.llvm.org/use/mcp.html) | NCSA | Cross-platform | Native LLDB | No |
+
+Different sweet spots: this project is the **MIT, cross-platform** option, with ASP.NET-flavoured
+composites on top of a DAP. debug-mcp goes deeper into runtime internals via ICorDebug but is
+Linux-only and AGPL today.
 
 ## Docs
 
