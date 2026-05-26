@@ -31,77 +31,133 @@ with variables — without you setting any breakpoint manually.
 
 ## See it in action
 
-### Why is my endpoint returning null?
+### Why is my EF Core query returning empty?
 
 **You**
 
-> `GET /users/42` is returning null. Can you figure out why?
+> `GET /users/active` returns `[]`, but I know there are active users in the DB. What's the
+> query actually doing?
 
 **Claude**
 
-> I'll run your app and stop inside the handler when the request hits.
+> I'll pause inside `UserRepository.GetActiveAsync` and read what EF Core actually sent.
 >
-> I followed the call from the controller into the user service and then into the repository.
-> Here's the query the repo is issuing against the DB:
+> ```sql
+> SELECT u.*
+> FROM Users AS u
+> WHERE u.IsActive = 1 AND u.TenantId = @__tenantId_0
 >
+> @__tenantId_0 = 0
 > ```
-> SELECT * FROM users WHERE id = '42'
-> ```
 >
-> That's the bug — the `id` is being dropped into the SQL as text instead of as a value, but
-> the `id` column is an `int`. Postgres returns zero rows for that comparison. Fix is to use a
-> parameter for the id and pass it as an int.
+> The SQL is correct; the parameter is wrong. `TenantId = 0`, but your tenants start at 1.
+> `ICurrentUser.TenantId` is being read in the repository constructor — before the request
+> scope resolves it. Fix: read the tenant inside the query (or apply it via `HasQueryFilter`
+> with `IHttpContextAccessor`) instead of capturing it at construction.
 
-### Why did my app throw?
+### Why is my JWT auth returning 401?
 
 **You**
 
-> My `/checkout` endpoint throws a `NullReferenceException` somewhere. Find it.
+> `/admin/users` is 401-ing for Anna, but her token looks valid to me. What does the auth
+> handler actually see?
 
 **Claude**
 
-> I'll catch any unhandled exception and run through your checkout flow. Caught it.
+> I'll break inside `JwtBearerHandler.HandleAuthenticateAsync` after her request lands.
 >
 > ```
-> Thrown at OrderService.cs:67
->
->   65: if (cart == null) throw new ArgumentNullException(nameof(cart));
->   66: var total = 0m;
-> → 67: foreach (var item in cart.Items) total += item.Price;
->
-> At the throw:
->   cart.Items = null
+> Token signature: ✓ valid
+> Claims built:
+>   name : anna
+>   role : User
+>   iss  : https://auth.staging.example
+>   aud  : app-api
+>   exp  : 2026-05-26T14:12:00Z      (not expired)
 > ```
 >
-> `LoadCart(userId)` on line 62 returned a `Cart` whose `Items` is `null` for new users — and
-> the null check on line 65 only checks `cart` itself, not `cart.Items`. Two fix options:
-> initialise `Items = []` in the `Cart` constructor, or use `cart.Items ?? []` on line 67.
+> The token validates fine — but the claim is `role=User`. Your endpoint is
+> `[Authorize(Roles="Admin")]`. So the 401 is correct: Anna isn't actually an admin yet
+> upstream. Either her IdP record needs updating, or this policy is wrong.
 
-### Trace a request through the call chain
+### Test a fix without restarting
 
 **You**
 
-> Hit `GET /order/42` and show me which methods get called and the arguments at each one — I
-> don't want to set breakpoints by hand.
+> I think capping `discount` at 100 fixes the bug. Test that hypothesis without me touching
+> the code.
 
 **Claude**
 
-> I'll instrument your order pipeline (Controller → Service → Repository → SqlClient) and fire
-> the request. The instrumentation auto-resumes after each capture, so your code runs at
-> near-normal speed.
+> I'll pause inside `ApplyDiscount` on the next checkout and mutate `discount` in place.
 >
 > ```
-> [+  679ms] → OrderController.GetOrder()       id=42, data=null
-> [+  711ms] --→ OrderService.LookupOrder()     id=42, raw=null, enriched=null
-> [+  735ms] ----→ OrderRepository.FetchById()  id=42
-> [+  759ms] ------→ SqlClient.ExecuteQuery()   sql="SELECT * FROM orders WHERE id = 42"
-> [+  783ms] ----→ EnrichmentService.Enrich()   raw="rows(sql=…)"
+> Paused at PricingService.cs:47
+>   discount = 250        ← bug: two promos stacked
+>
+> Set discount = 100, resumed.
+>
+> Result:
+>   subtotal = $400
+>   final    = $300
+>   refund-service complaints: 0
 > ```
 >
-> Every line is one real method entry with the actual arguments at that moment. The arrows
-> show call depth. The request finished with 200 — no manual breakpoints, no pauses.
+> Capping at 100 unblocks the flow downstream. Hypothesis confirmed — time to make the edit
+> for real and decide where the cap belongs (`ApplyDiscount` itself, or upstream in
+> `PromoEngine`).
 
-[See 5 more →](docs/examples.md)
+### My app is hung — what's actually blocking?
+
+**You**
+
+> `/reports` hangs forever in staging. Attach and tell me why.
+
+**Claude**
+
+> Attached. Ran `hang_analyze`.
+>
+> ```
+> Thread 12 (HTTP request)
+>   → blockedOnTask    at ReportService.cs:38   Task.Wait() on T#14
+>
+> Thread 14 (worker)
+>   → blockedOnMonitor at SqlConnectionPool.cs:91
+>                       waiting for SqlConnection
+>                       (pool max=5, in-use=5)
+> ```
+>
+> Classic sync-over-async deadlock. Thread 12 calls `.Wait()` on a task that itself needs to
+> open another `SqlConnection` from a fully-held pool. The connection it's holding can't be
+> released until the task completes; the task can't proceed until a connection frees up. Fix:
+> `await` all the way down in `ReportService`, or don't hold a connection across the awaited
+> call.
+
+### Where is a slow request actually spending its time?
+
+**You**
+
+> `GET /order/42` takes 800ms. I don't want to set breakpoints all over — just show me where
+> the time is going.
+
+**Claude**
+
+> I'll auto-instrument your order pipeline and fire the request. Each entry logs the
+> timestamp + arguments, then resumes — the code runs near-normal speed.
+>
+> ```
+> [+   4ms] → OrderController.GetOrder()       id=42
+> [+   6ms] --→ OrderService.LookupOrder()     id=42
+> [+   9ms] ----→ OrderRepository.FetchById()  id=42
+> [+  14ms] ------→ SqlClient.ExecuteQuery()   sql="SELECT * FROM orders WHERE id=42"
+> [+ 287ms] ----→ EnrichmentService.Enrich()   raw="rows(...)"
+> [+ 781ms] ------→ HttpClient.PostAsync()     url="https://crm.internal/enrich"
+> ```
+>
+> Time is in the CRM enrichment HTTP call — 500ms inside `HttpClient.PostAsync`. DB itself
+> was 5ms. Worth caching `EnrichmentService.Enrich` or moving it off the request path.
+
+[More examples →](docs/examples.md)
 
 ## How it works
 
