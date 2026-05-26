@@ -10,10 +10,7 @@
 [![MCP](https://img.shields.io/badge/MCP-compatible-005FBA)](https://modelcontextprotocol.io/)
 [![Platforms](https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-success)](#platforms)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-<a href="https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp/badge" alt="aspnetcore-debugger-mcp MCP server" />
-</a>
+[![Glama Quality](https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp/badges/score.svg)](https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp)
 
 > **MIT-licensed [MCP](https://modelcontextprotocol.io/) server that lets an AI agent (Claude, etc.) debug your .NET / ASP.NET Core app interactively.**
 >
