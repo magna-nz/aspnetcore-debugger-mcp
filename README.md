@@ -12,19 +12,22 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Glama Quality](https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp/badges/score.svg?v=2)](https://glama.ai/mcp/servers/magna-nz/aspnetcore-debugger-mcp)
 
-> **MIT-licensed [MCP](https://modelcontextprotocol.io/) server that lets an AI agent (Claude, etc.) debug your .NET / ASP.NET Core app interactively.**
->
-> ✅ **Linux** (x64, arm64) &nbsp;·&nbsp; ✅ **macOS** (Intel + Apple Silicon) &nbsp;·&nbsp; ✅ **Windows** (x64)
->
-> netcoredbg is bundled for every platform — nothing extra to install.
+**An MIT-licensed [MCP](https://modelcontextprotocol.io/) server that lets an AI agent (Claude, etc.) debug your .NET / ASP.NET Core app — netcoredbg bundled for every platform, nothing extra to install.**
 
 Instead of *"I think the bug is around line 42, try this"*, the agent runs your code, pauses it,
 reads the actual runtime values, mutates state to test a fix, and answers grounded in what it
 actually saw.
 
-27 tools across launching, breakpoints, stepping, inspection, expression evaluation, exception
-autopsy, hang analysis, and **server-side request tracing** that captures the full call chain
-with variables — without you setting any breakpoint manually.
+## Contents
+
+- [See it in action](#see-it-in-action) — 5 conversations showing the agent at work
+- [How it works](#how-it-works) — architecture diagram
+- [Use it in 3 steps](#use-it-in-3-steps) — install + register with Claude
+- [Platforms](#platforms) — supported OS / architecture matrix
+- [Tools (27)](#tools-27) — full tool surface grouped by purpose
+- [How this compares](#how-this-compares) — vs. other .NET / DAP MCPs
+- [Docs](#docs) — install, examples, tool reference, limits
+- [License](#license)
 
 ## See it in action
 
