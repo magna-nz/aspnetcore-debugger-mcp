@@ -77,6 +77,8 @@ public sealed class SessionTools
         state = snap.State,
         processId = snap.ProcessId,
         lastStop = snap.LastStop,
+        outputBuffer = snap.OutputBuffer,
+        traceBuffer = snap.TraceBuffer,
     }, JsonOpts);
 
     private static string Err(Exception ex)

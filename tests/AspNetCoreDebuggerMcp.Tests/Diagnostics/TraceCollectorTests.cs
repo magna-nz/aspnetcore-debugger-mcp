@@ -88,4 +88,31 @@ public class TraceCollectorTests
         c.Start(new[] { "Foo" }, true, true, includeExceptions: true, 10, 10);
         Assert.True(c.ExceptionTracingEnabled);
     }
+
+    [Fact]
+    public void Append_BeyondMaxEvents_DropsOldest()
+    {
+        var c = new TraceCollector(maxEvents: 5);
+        c.Start(new[] { "Foo" }, true, true, true, 10, 10);
+        for (int i = 0; i < 10; i++)
+            c.Append(new TraceEvent(i, TraceEventKind.Enter, 1, $"M{i}", null, null, null, null));
+
+        var stats = c.BufferStats();
+        Assert.True(stats.Active);
+        Assert.Equal(5, stats.Events);
+        Assert.Equal(5, stats.DroppedEvents);
+
+        var events = c.Events();
+        Assert.Equal(new[] { "M5", "M6", "M7", "M8", "M9" }, events.Select(e => e.Method));
+    }
+
+    [Fact]
+    public void BufferStats_BeforeStart_ReportsInactive()
+    {
+        var c = new TraceCollector();
+        var stats = c.BufferStats();
+        Assert.False(stats.Active);
+        Assert.Equal(0, stats.Events);
+        Assert.Equal(0, stats.DroppedEvents);
+    }
 }

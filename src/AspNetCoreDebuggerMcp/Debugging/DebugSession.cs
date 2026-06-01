@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using AspNetCoreDebuggerMcp.Breakpoints;
 using AspNetCoreDebuggerMcp.Dap;
@@ -19,7 +18,7 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly BreakpointRegistry _breakpoints = new();
     private readonly InspectionService _inspector;
     private readonly TraceCollector _trace = new();
-    private readonly ConcurrentQueue<OutputLine> _outputBuffer = new();
+    private readonly BoundedOutputBuffer _outputBuffer = new();
     private IReadOnlyList<string> _exceptionFiltersBeforeTrace = Array.Empty<string>();
     private readonly TaskCompletionSource _initializedTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -31,7 +30,12 @@ internal sealed class DebugSession : IAsyncDisposable
     public int? ProcessId { get { lock (_gate) return _processId; } }
     public StopInfo? LastStop { get { lock (_gate) return _lastStop; } }
 
-    public SessionSnapshot Snapshot() => new(State.ToString(), ProcessId, LastStop);
+    public SessionSnapshot Snapshot() => new(
+        State.ToString(),
+        ProcessId,
+        LastStop,
+        OutputBufferStats(),
+        TraceBufferStats());
     public BreakpointsSnapshot BreakpointsSnapshot() => _breakpoints.Snapshot();
 
     private DebugSession(NetcoredbgProcess process, DapClient client)
@@ -350,16 +354,11 @@ internal sealed class DebugSession : IAsyncDisposable
     // ---- output buffer + hang analysis ----------------------------------------------
 
     public IReadOnlyList<OutputLine> DrainOutput(string? category = null, int? maxLines = null)
-    {
-        var collected = new List<OutputLine>();
-        while (_outputBuffer.TryDequeue(out var line))
-        {
-            if (category is null || string.Equals(line.Category, category, StringComparison.OrdinalIgnoreCase))
-                collected.Add(line);
-            if (maxLines is int m && collected.Count >= m) break;
-        }
-        return collected;
-    }
+        => _outputBuffer.Drain(category, maxLines);
+
+    public OutputBufferStats OutputBufferStats() => _outputBuffer.Snapshot();
+
+    public TraceBufferStats TraceBufferStats() => _trace.BufferStats();
 
     public async Task<HangAnalysis> HangAnalyzeAsync(int topFramesPerThread, CancellationToken ct)
     {
@@ -732,6 +731,8 @@ internal sealed class DebugSession : IAsyncDisposable
         if (output.Length == 0) return;
         _outputBuffer.Enqueue(new OutputLine(category, output, DateTimeOffset.UtcNow));
     }
+
+
 
     private void HandleBreakpointEvent(DapMessage e)
     {
