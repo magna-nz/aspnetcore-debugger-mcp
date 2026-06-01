@@ -6,11 +6,21 @@ namespace AspNetCoreDebuggerMcp.Diagnostics;
 ///  - the set of function names being traced (used at start to set BPs)
 ///  - the adapter-issued BP ids (used to recognise trace hits in DAP stopped events)
 ///  - whether exception traces are enabled
-///  - the captured TraceEvent log
+///  - the captured TraceEvent log (capped, drop-oldest — see MAG-54)
 internal sealed class TraceCollector
 {
+    public const int DefaultMaxEvents = 50_000;
+
     private readonly object _gate = new();
+    private readonly int _maxEvents;
     private TraceSession? _current;
+    private long _droppedEvents;
+
+    public TraceCollector(int maxEvents = DefaultMaxEvents)
+    {
+        if (maxEvents <= 0) throw new ArgumentOutOfRangeException(nameof(maxEvents));
+        _maxEvents = maxEvents;
+    }
 
     public bool IsActive { get { lock (_gate) return _current is not null; } }
 
@@ -93,7 +103,25 @@ internal sealed class TraceCollector
 
     public void Append(TraceEvent ev)
     {
-        lock (_gate) _current?.Events.Add(ev);
+        lock (_gate)
+        {
+            if (_current is null) return;
+            _current.Events.Add(ev);
+            while (_current.Events.Count > _maxEvents)
+            {
+                _current.Events.RemoveAt(0);
+                _droppedEvents++;
+            }
+        }
+    }
+
+    public TraceBufferStats BufferStats()
+    {
+        lock (_gate)
+        {
+            var count = _current?.Events.Count ?? 0;
+            return new TraceBufferStats(_current is not null, count, _droppedEvents, _maxEvents);
+        }
     }
 
     public long ElapsedMs(DateTimeOffset now)
@@ -136,3 +164,9 @@ public sealed record TraceConfig(
     bool CaptureLocals,
     int MaxFramesPerEvent,
     int MaxLocalsPerFrame);
+
+public sealed record TraceBufferStats(
+    bool Active,
+    int Events,
+    long DroppedEvents,
+    int MaxEvents);
