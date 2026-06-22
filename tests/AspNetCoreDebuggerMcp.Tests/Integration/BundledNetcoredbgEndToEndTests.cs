@@ -70,6 +70,64 @@ public class BundledNetcoredbgEndToEndTests
     }
 
     [Fact]
+    public async Task Manager_WaitForStop_ReturnsTopFrameLocalsAndRecentOutput()
+    {
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;  // skip — see other test
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var programCs = LocateSourceFile("SampleWebApi", "Program.cs");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var manager = new DebugSessionManager();
+
+        await manager.LaunchAsync(
+            program: webApiDll,
+            args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll),
+            stopAtEntry: false,
+            env: null,
+            cts.Token);
+
+        const int handlerLine = 6;
+        await manager.AddLineBreakpointAsync(
+            sourcePath: programCs, line: handlerLine,
+            condition: null, hitCondition: null, logMessage: null, cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var requestTask = http.GetAsync($"{baseUrl}/users/42", cts.Token);
+
+        var result = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(20),
+            maxLocalsPerScope: 30,
+            maxRecentOutputLines: 50,
+            cts.Token);
+
+        Assert.Equal("breakpoint", result.Stop.Reason);
+        Assert.NotNull(result.TopFrame);
+
+        // The new enriched fields — the whole point of this test.
+        Assert.NotNull(result.TopFrameLocals);
+        var allVars = result.TopFrameLocals!.SelectMany(s => s.Variables).ToList();
+        Assert.Contains(allVars, v => v.Name == "id" && v.Value == "42");
+
+        // RecentOutput is non-null whenever the cap is > 0. ASP.NET Core's startup
+        // banner ("Now listening on…" / "Application started.") almost always lands
+        // in the buffer before the BP hits, but it's racy — assert structure, not count.
+        Assert.NotNull(result.RecentOutput);
+
+        await manager.ContinueAsync(result.Stop.ThreadId, cts.Token);
+        var response = await requestTask;
+        Assert.True(response.IsSuccessStatusCode);
+
+        await manager.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
     public async Task DebugSession_PassesEnvironmentVariables_ToDebuggee()
     {
         var bundled = LocateBundledNetcoredbg();

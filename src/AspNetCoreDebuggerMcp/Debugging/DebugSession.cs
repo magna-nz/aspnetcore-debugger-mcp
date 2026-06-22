@@ -356,6 +356,9 @@ internal sealed class DebugSession : IAsyncDisposable
     public IReadOnlyList<OutputLine> DrainOutput(string? category = null, int? maxLines = null)
         => _outputBuffer.Drain(category, maxLines);
 
+    public IReadOnlyList<OutputLine> PeekRecentOutput(int maxLines, string? category = null)
+        => _outputBuffer.PeekRecent(maxLines, category);
+
     public OutputBufferStats OutputBufferStats() => _outputBuffer.Snapshot();
 
     public TraceBufferStats TraceBufferStats() => _trace.BufferStats();

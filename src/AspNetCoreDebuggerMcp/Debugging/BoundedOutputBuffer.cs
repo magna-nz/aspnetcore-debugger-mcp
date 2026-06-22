@@ -63,6 +63,25 @@ internal sealed class BoundedOutputBuffer
         return collected;
     }
 
+    /// Non-destructive snapshot of the most recent matching lines, in chronological
+    /// order (oldest first). Used by composite tools (e.g. breakpoint_wait) that want
+    /// to surface "what just printed" without disturbing a caller's drain pattern.
+    public IReadOnlyList<OutputLine> PeekRecent(int maxLines, string? category = null)
+    {
+        if (maxLines <= 0) return Array.Empty<OutputLine>();
+        lock (_gate)
+        {
+            if (_items.Count == 0) return Array.Empty<OutputLine>();
+            IEnumerable<OutputLine> source = _items;
+            if (category is not null)
+                source = source.Where(l => string.Equals(l.Category, category, StringComparison.OrdinalIgnoreCase));
+            // Materialise inside the lock; the queue may mutate the moment we release it.
+            var filtered = source as IReadOnlyCollection<OutputLine> ?? source.ToList();
+            if (filtered.Count <= maxLines) return filtered.ToList();
+            return filtered.Skip(filtered.Count - maxLines).ToList();
+        }
+    }
+
     public OutputBufferStats Snapshot()
     {
         lock (_gate)
