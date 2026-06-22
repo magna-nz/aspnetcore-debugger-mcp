@@ -147,6 +147,79 @@ public class BoundedOutputBufferTests
         Assert.True(stats.DroppedLines > 0, "expected drops under flood");
     }
 
+    [Fact]
+    public void PeekRecent_ReturnsLastN_InChronologicalOrder()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        for (int i = 0; i < 10; i++)
+            buf.Enqueue(Line($"line-{i}"));
+
+        var peek = buf.PeekRecent(maxLines: 3);
+        Assert.Equal(new[] { "line-7", "line-8", "line-9" }, peek.Select(l => l.Output));
+    }
+
+    [Fact]
+    public void PeekRecent_IsNonDestructive()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        for (int i = 0; i < 5; i++)
+            buf.Enqueue(Line($"line-{i}"));
+
+        _ = buf.PeekRecent(maxLines: 2);
+
+        // A subsequent drain must see every line — peek must not have consumed any.
+        var drained = buf.Drain();
+        Assert.Equal(5, drained.Count);
+        Assert.Equal(new[] { "line-0", "line-1", "line-2", "line-3", "line-4" },
+            drained.Select(l => l.Output));
+    }
+
+    [Fact]
+    public void PeekRecent_LargerThanBuffer_ReturnsAll()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        for (int i = 0; i < 3; i++)
+            buf.Enqueue(Line($"line-{i}"));
+
+        var peek = buf.PeekRecent(maxLines: 50);
+        Assert.Equal(3, peek.Count);
+        Assert.Equal(new[] { "line-0", "line-1", "line-2" }, peek.Select(l => l.Output));
+    }
+
+    [Fact]
+    public void PeekRecent_RespectsCategoryFilter()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(new OutputLine("stdout", "out-1", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "err-1", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "out-2", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "err-2", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "out-3", DateTimeOffset.UtcNow));
+
+        var peek = buf.PeekRecent(maxLines: 2, category: "stderr");
+        Assert.Equal(new[] { "err-1", "err-2" }, peek.Select(l => l.Output));
+    }
+
+    [Fact]
+    public void PeekRecent_NonPositive_ReturnsEmpty()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(Line("a"));
+
+        Assert.Empty(buf.PeekRecent(maxLines: 0));
+        Assert.Empty(buf.PeekRecent(maxLines: -5));
+
+        // Buffer still intact.
+        Assert.Equal(1, buf.Snapshot().Lines);
+    }
+
+    [Fact]
+    public void PeekRecent_EmptyBuffer_ReturnsEmpty()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        Assert.Empty(buf.PeekRecent(maxLines: 10));
+    }
+
     private static OutputLine Line(string text) =>
         new OutputLine("stdout", text, DateTimeOffset.UtcNow);
 }

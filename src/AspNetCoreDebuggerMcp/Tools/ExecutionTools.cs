@@ -8,6 +8,8 @@ namespace AspNetCoreDebuggerMcp.Tools;
 public sealed class ExecutionTools
 {
     private const int DefaultWaitTimeoutSeconds = 30;
+    private const int DefaultMaxLocalsPerScope = 30;
+    private const int DefaultMaxRecentOutputLines = 50;
 
     private readonly DebugSessionManager _manager;
 
@@ -57,15 +59,19 @@ public sealed class ExecutionTools
     }
 
     [McpServerTool(Name = "breakpoint_wait")]
-    [Description("Block until the debuggee hits a breakpoint, completes a step, or otherwise stops. Returns the stop info plus auto-context: the topmost stack frame and a source snippet around the stop.")]
+    [Description("Block until the debuggee hits a breakpoint, completes a step, or otherwise stops. Returns the stop info plus a full one-shot snapshot: the topmost stack frame, a source snippet around the stop, top-frame locals, and a peek of recent debuggee stdout/stderr (non-destructive — process_read_output still drains the full buffer). Designed so an agent in a step-inspect loop doesn't need separate inspect / read-output round trips.")]
     public async Task<string> WaitAsync(
         [Description("Maximum seconds to wait. Defaults to 30.")] int? timeoutSeconds = null,
+        [Description("Cap on locals returned per scope on the top frame. Default 30. Pass 0 to omit locals entirely.")] int? maxLocalsPerScope = null,
+        [Description("Cap on recent debuggee output lines included with the stop (peeked, not drained). Default 50. Pass 0 to omit output.")] int? maxRecentOutputLines = null,
         CancellationToken ct = default)
     {
         try
         {
             var timeout = TimeSpan.FromSeconds(timeoutSeconds ?? DefaultWaitTimeoutSeconds);
-            var result = await _manager.WaitForStopAsync(timeout, ct).ConfigureAwait(false);
+            var localsCap = Math.Max(0, maxLocalsPerScope ?? DefaultMaxLocalsPerScope);
+            var outputCap = Math.Max(0, maxRecentOutputLines ?? DefaultMaxRecentOutputLines);
+            var result = await _manager.WaitForStopAsync(timeout, localsCap, outputCap, ct).ConfigureAwait(false);
             return ToolResults.Serialize(new
             {
                 success = true,
@@ -74,6 +80,8 @@ public sealed class ExecutionTools
                 processId = result.Session.ProcessId,
                 topFrame = result.TopFrame,
                 snippet = result.Snippet,
+                topFrameLocals = result.TopFrameLocals,
+                recentOutput = result.RecentOutput,
             });
         }
         catch (OperationCanceledException)

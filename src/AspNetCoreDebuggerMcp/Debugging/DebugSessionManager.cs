@@ -5,12 +5,15 @@ using AspNetCoreDebuggerMcp.Inspection;
 namespace AspNetCoreDebuggerMcp.Debugging;
 
 /// Combined result of a wait-for-stop call: the stop event, the current session snapshot,
-/// and auto-context (top frame + source snippet) when the stopped thread is known.
+/// and auto-context (top frame, source snippet, top-frame locals, and recent debuggee
+/// output) when the stopped thread is known. Locals and recent output are opt-in via caps.
 public sealed record WaitResult(
     StopInfo Stop,
     SessionSnapshot Session,
     StackFrame? TopFrame,
-    SourceSnippet? Snippet);
+    SourceSnippet? Snippet,
+    IReadOnlyList<ScopeWithVariables>? TopFrameLocals,
+    IReadOnlyList<OutputLine>? RecentOutput);
 
 /// Holds the single active debug session. Session-lifecycle calls (launch/attach/disconnect)
 /// are serialised under a semaphore so concurrent tool invocations cannot race. Within a session,
@@ -93,14 +96,18 @@ public sealed class DebugSessionManager : IAsyncDisposable
         return s.Snapshot();
     }
 
-    public async Task<WaitResult> WaitForStopAsync(TimeSpan timeout, CancellationToken ct)
+    public async Task<WaitResult> WaitForStopAsync(
+        TimeSpan timeout, int maxLocalsPerScope, int maxRecentOutputLines, CancellationToken ct)
     {
         var s = RequireActiveSession();
         var stop = await s.WaitForStopAsync(timeout, ct).ConfigureAwait(false);
 
-        // Auto-context-on-stop: best-effort top frame + source snippet for the stopped thread.
+        // Auto-context-on-stop: best-effort top frame, source snippet, top-frame locals,
+        // and a peek of recent debuggee output — all opportunistic. Failures here must not
+        // turn a successful stop into a tool error; the agent still needs the StopInfo.
         StackFrame? topFrame = null;
         SourceSnippet? snippet = null;
+        IReadOnlyList<ScopeWithVariables>? topLocals = null;
         if (stop.ThreadId is int tid)
         {
             try { topFrame = await s.GetTopFrameAsync(tid, ct).ConfigureAwait(false); }
@@ -108,9 +115,25 @@ public sealed class DebugSessionManager : IAsyncDisposable
 
             if (topFrame is { SourcePath: { } path, Line: int line })
                 snippet = InspectionService.TryReadSnippet(path, line);
+
+            if (topFrame is not null && maxLocalsPerScope > 0)
+            {
+                try
+                {
+                    topLocals = await s.GetScopesAsync(
+                        topFrame.Id, depth: 1, maxChildren: maxLocalsPerScope, ct)
+                        .ConfigureAwait(false);
+                }
+                catch { /* best-effort */ }
+            }
         }
 
-        return new WaitResult(stop, s.Snapshot(), topFrame, snippet);
+        // Non-destructive peek so existing process_read_output flows aren't disturbed.
+        IReadOnlyList<OutputLine>? recentOutput = maxRecentOutputLines > 0
+            ? s.PeekRecentOutput(maxRecentOutputLines)
+            : null;
+
+        return new WaitResult(stop, s.Snapshot(), topFrame, snippet, topLocals, recentOutput);
     }
 
     // ---- inspection passthroughs ---------------------------------------------------
