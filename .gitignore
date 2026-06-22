@@ -19,6 +19,9 @@ artifacts/
 .netcoredbg-build/
 external/netcoredbg/build/
 
+# netcoredbg CLI history (written when the bundled binary runs in CLI mode)
+.netcoredbg_hist
+
 # Bundled netcoredbg binaries — populated by scripts/fetch-netcoredbg-binaries.sh
 # (CI runs this before `dotnet pack`). Out of git to keep repo light.
 src/AspNetCoreDebuggerMcp/runtimes/
