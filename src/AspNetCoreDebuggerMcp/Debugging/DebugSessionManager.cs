@@ -216,6 +216,9 @@ public sealed class DebugSessionManager : IAsyncDisposable
     public IReadOnlyList<OutputLine> DrainOutput(string? category, int? maxLines)
         => _session?.DrainOutput(category, maxLines) ?? Array.Empty<OutputLine>();
 
+    public IReadOnlyList<OutputLine> PeekRecentOutput(int maxLines, string? category = null)
+        => _session?.PeekRecentOutput(maxLines, category) ?? Array.Empty<OutputLine>();
+
     private int ResolveThreadIdOrThrow(int? threadId)
     {
         if (threadId is int id) return id;
