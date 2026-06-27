@@ -10,6 +10,7 @@ public sealed class InspectionTools
     private const int DefaultDepth = 1;
     private const int DefaultMaxChildren = 50;
     private const int DefaultAutopsyFrameCount = 20;
+    private const int DefaultMaxRecentOutputLines = 50;
 
     private readonly DebugSessionManager _manager;
 
@@ -115,17 +116,20 @@ public sealed class InspectionTools
     }
 
     [McpServerTool(Name = "exception_autopsy")]
-    [Description("Full exception context in one call: exception type + inner-exception chain + top stack frames + top frame's locals + source snippet around the throw. Call this when state.lastStop.reason == \"exception\".")]
+    [Description("Full exception context in one call: exception type + inner-exception chain + top stack frames + top frame's locals + source snippet around the throw + a peek of recent debuggee stdout/stderr (non-destructive — process_read_output still drains the full buffer). Call this when state.lastStop.reason == \"exception\".")]
     public async Task<string> AutopsyAsync(
         [Description("Thread id. Defaults to the last-stopped thread.")] int? threadId = null,
         [Description("How many top stack frames to include. Default 20.")] int? frameCount = null,
+        [Description("Cap on recent debuggee output lines included with the autopsy (peeked, not drained). Default 50. Pass 0 to omit output.")] int? maxRecentOutputLines = null,
         CancellationToken ct = default)
     {
         try
         {
             var autopsy = await _manager.AutopsyAsync(
                 threadId, frameCount ?? DefaultAutopsyFrameCount, ct).ConfigureAwait(false);
-            return ToolResults.Serialize(new { success = true, autopsy });
+            var outputCap = Math.Max(0, maxRecentOutputLines ?? DefaultMaxRecentOutputLines);
+            var recentOutput = outputCap > 0 ? _manager.PeekRecentOutput(outputCap) : null;
+            return ToolResults.Serialize(new { success = true, autopsy, recentOutput });
         }
         catch (Exception ex) { return ToolResults.Err(ex); }
     }

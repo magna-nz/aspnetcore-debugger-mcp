@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using AspNetCoreDebuggerMcp.Debugging;
+using AspNetCoreDebuggerMcp.Tools;
 
 namespace AspNetCoreDebuggerMcp.Tests.Integration;
 
@@ -124,6 +126,228 @@ public class BundledNetcoredbgEndToEndTests
         var response = await requestTask;
         Assert.True(response.IsSuccessStatusCode);
 
+        await manager.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task Tool_DebugStep_DefaultReturnsSimpleShape_NoEnrichment()
+    {
+        // Regression guard: when called without waitTimeoutSeconds, debug_step must
+        // return ONLY { success, state } — the same shape it returned before this PR.
+        // After issuing the no-wait step we still need a WaitForStop to let the step
+        // settle before resuming, because manager.StepAsync only awaits the DAP ack,
+        // not the resulting stop event — that's the exact "old pattern" agents use today.
+
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var programCs = LocateSourceFile("SampleWebApi", "Program.cs");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var manager = new DebugSessionManager();
+        var execTools = new ExecutionTools(manager);
+
+        await manager.LaunchAsync(
+            program: webApiDll, args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll), stopAtEntry: false, env: null, cts.Token);
+
+        const int handlerLine = 6;
+        await manager.AddLineBreakpointAsync(
+            sourcePath: programCs, line: handlerLine,
+            condition: null, hitCondition: null, logMessage: null, cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var requestTask = http.GetAsync($"{baseUrl}/users/42", cts.Token);
+
+        var stop = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(20),
+            maxLocalsPerScope: 30, maxRecentOutputLines: 50, cts.Token);
+        Assert.Equal("breakpoint", stop.Stop.Reason);
+
+        // Default (no wait): tool returns ONLY success + state. No enrichment fields.
+        var defaultJson = await execTools.StepAsync(
+            kind: "over", threadId: stop.Stop.ThreadId,
+            waitTimeoutSeconds: null, maxLocalsPerScope: null, maxRecentOutputLines: null,
+            ct: cts.Token);
+        using (var doc = JsonDocument.Parse(defaultJson))
+        {
+            var root = doc.RootElement;
+            Assert.True(root.GetProperty("success").GetBoolean());
+            Assert.True(root.TryGetProperty("state", out _));
+            Assert.False(root.TryGetProperty("topFrame", out _),
+                "default debug_step (no wait) must not include enrichment fields");
+            Assert.False(root.TryGetProperty("topFrameLocals", out _));
+            Assert.False(root.TryGetProperty("recentOutput", out _));
+            Assert.False(root.TryGetProperty("stop", out _));
+        }
+
+        // Settle the step (this is the agent flow today: step, then wait separately),
+        // then resume so the request can complete.
+        var postStep = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(20),
+            maxLocalsPerScope: 0, maxRecentOutputLines: 0, cts.Token);
+        Assert.Equal("step", postStep.Stop.Reason);
+
+        await manager.ContinueAsync(postStep.Stop.ThreadId, cts.Token);
+        var response = await requestTask;
+        Assert.True(response.IsSuccessStatusCode);
+        await manager.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task Tool_DebugStep_OptInWaitReturnsEnrichedSnapshot()
+    {
+        // The headline feature: pass waitTimeoutSeconds and debug_step returns the same
+        // one-shot snapshot as breakpoint_wait (stop, topFrame, snippet, locals, recentOutput)
+        // — one tool call instead of two.
+
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var programCs = LocateSourceFile("SampleWebApi", "Program.cs");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var manager = new DebugSessionManager();
+        var execTools = new ExecutionTools(manager);
+
+        await manager.LaunchAsync(
+            program: webApiDll, args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll), stopAtEntry: false, env: null, cts.Token);
+
+        const int handlerLine = 6;
+        await manager.AddLineBreakpointAsync(
+            sourcePath: programCs, line: handlerLine,
+            condition: null, hitCondition: null, logMessage: null, cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var requestTask = http.GetAsync($"{baseUrl}/users/42", cts.Token);
+
+        var stop = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(20),
+            maxLocalsPerScope: 30, maxRecentOutputLines: 50, cts.Token);
+        Assert.Equal("breakpoint", stop.Stop.Reason);
+
+        var enrichedJson = await execTools.StepAsync(
+            kind: "over", threadId: stop.Stop.ThreadId,
+            waitTimeoutSeconds: 20, maxLocalsPerScope: 30, maxRecentOutputLines: 50,
+            ct: cts.Token);
+
+        int postStepThreadId;
+        using (var doc = JsonDocument.Parse(enrichedJson))
+        {
+            var root = doc.RootElement;
+            Assert.True(root.GetProperty("success").GetBoolean(),
+                $"opt-in step+wait failed: {enrichedJson}");
+
+            Assert.True(root.TryGetProperty("stop", out var stopEl));
+            Assert.Equal("step", stopEl.GetProperty("reason").GetString());
+            Assert.True(root.TryGetProperty("topFrame", out _));
+            Assert.True(root.TryGetProperty("topFrameLocals", out var localsEl));
+            Assert.True(root.TryGetProperty("recentOutput", out _));
+
+            // `id` should still be in scope after a step inside the lambda body.
+            var hasId = false;
+            foreach (var scope in localsEl.EnumerateArray())
+            foreach (var v in scope.GetProperty("variables").EnumerateArray())
+            {
+                if (v.GetProperty("name").GetString() == "id"
+                    && v.GetProperty("value").GetString() == "42")
+                {
+                    hasId = true;
+                }
+            }
+            Assert.True(hasId, "post-step top frame should still expose id=42");
+            postStepThreadId = stopEl.GetProperty("threadId").GetInt32();
+        }
+
+        await manager.ContinueAsync(postStepThreadId, cts.Token);
+        var response = await requestTask;
+        Assert.True(response.IsSuccessStatusCode);
+        await manager.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
+    public async Task Tool_ExceptionAutopsy_IncludesRecentOutputField()
+    {
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var programCs = LocateSourceFile("SampleWebApi", "Program.cs");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var manager = new DebugSessionManager();
+        var inspectTools = new InspectionTools(manager);
+
+        await manager.LaunchAsync(
+            program: webApiDll, args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll), stopAtEntry: false, env: null, cts.Token);
+
+        const int handlerLine = 6;
+        await manager.AddLineBreakpointAsync(
+            sourcePath: programCs, line: handlerLine,
+            condition: null, hitCondition: null, logMessage: null, cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var requestTask = http.GetAsync($"{baseUrl}/users/42", cts.Token);
+
+        var stop = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(20),
+            maxLocalsPerScope: 30, maxRecentOutputLines: 50, cts.Token);
+        Assert.Equal("breakpoint", stop.Stop.Reason);
+
+        // Autopsy doesn't require an exception stop — exceptionInfo is best-effort
+        // and the rest (frames, locals, snippet) populates on any stop. That's enough
+        // to verify the new recentOutput field is wired through.
+        var autopsyJson = await inspectTools.AutopsyAsync(
+            threadId: stop.Stop.ThreadId,
+            frameCount: 5,
+            maxRecentOutputLines: 50,
+            ct: cts.Token);
+
+        using (var doc = JsonDocument.Parse(autopsyJson))
+        {
+            var root = doc.RootElement;
+            Assert.True(root.GetProperty("success").GetBoolean(),
+                $"autopsy failed: {autopsyJson}");
+            Assert.True(root.TryGetProperty("autopsy", out _));
+            Assert.True(root.TryGetProperty("recentOutput", out var recentEl),
+                "autopsy response must include recentOutput field");
+            Assert.Equal(JsonValueKind.Array, recentEl.ValueKind);
+        }
+
+        // Verify the opt-out path: maxRecentOutputLines = 0 sets the field to null,
+        // and the shared JSON serializer (WhenWritingNull) drops it from the wire.
+        var optOutJson = await inspectTools.AutopsyAsync(
+            threadId: stop.Stop.ThreadId,
+            frameCount: 5,
+            maxRecentOutputLines: 0,
+            ct: cts.Token);
+        using (var doc = JsonDocument.Parse(optOutJson))
+        {
+            var root = doc.RootElement;
+            Assert.True(root.GetProperty("success").GetBoolean());
+            Assert.False(root.TryGetProperty("recentOutput", out _),
+                "opt-out (maxRecentOutputLines=0) must omit recentOutput from the response");
+        }
+
+        await manager.ContinueAsync(stop.Stop.ThreadId, cts.Token);
+        var response = await requestTask;
+        Assert.True(response.IsSuccessStatusCode);
         await manager.DisconnectAsync(cts.Token);
     }
 
