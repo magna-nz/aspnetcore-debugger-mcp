@@ -1,5 +1,7 @@
 # ASP.NET Core Debugging MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.magna-nz%2Faspnetcore-debugger-mcp.svg)](https://mcptoplist.com/server/io.github.magna-nz%2Faspnetcore-debugger-mcp)
+
 ### The cross-platform .NET debugging MCP — runs on **Linux**, **macOS**, and **Windows**.
 
 <!-- mcp-name: io.github.magna-nz/aspnetcore-debugger-mcp -->
