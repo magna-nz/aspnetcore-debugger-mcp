@@ -25,6 +25,7 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly object _gate = new();
     private int? _processId;
     private StopInfo? _lastStop;
+    private bool _isLaunch;
 
     public SessionState State => _stateMachine.State;
     public int? ProcessId { get { lock (_gate) return _processId; } }
@@ -143,6 +144,8 @@ internal sealed class DebugSession : IAsyncDisposable
     private async Task HandshakeAsync(
         bool isLaunch, Dictionary<string, object?> startArgs, CancellationToken ct)
     {
+        _isLaunch = isLaunch;
+
         var initialize = await _client.SendRequestAsync("initialize", new
         {
             clientID = "aspnetcore-debugger-mcp",
@@ -177,7 +180,7 @@ internal sealed class DebugSession : IAsyncDisposable
     {
         try
         {
-            await _client.SendRequestAsync("disconnect", new { terminateDebuggee = true }, ct)
+            await _client.SendRequestAsync("disconnect", new { terminateDebuggee = _isLaunch }, ct)
                 .ConfigureAwait(false);
         }
         catch
