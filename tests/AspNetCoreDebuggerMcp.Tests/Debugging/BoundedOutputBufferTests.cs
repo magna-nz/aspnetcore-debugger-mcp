@@ -93,6 +93,83 @@ public class BoundedOutputBufferTests
     }
 
     [Fact]
+    public void Drain_FilterByCategory_LeavesOtherCategoriesInTheBuffer()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(new OutputLine("stdout", "a", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "b", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "c", DateTimeOffset.UtcNow));
+
+        buf.Drain(category: "stderr");
+
+        // Draining one category must not discard the others — a stderr read followed by a
+        // stdout read has to return the stdout that was already buffered.
+        Assert.Equal(new[] { "a", "c" }, buf.Drain().Select(l => l.Output));
+    }
+
+    [Fact]
+    public void Drain_FilterByCategory_WithMaxLines_KeepsUnreturnedMatchesInOrder()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(new OutputLine("stdout", "o1", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "e1", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "o2", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "e2", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "o3", DateTimeOffset.UtcNow));
+
+        var firstError = buf.Drain(category: "stderr", maxLines: 1);
+        Assert.Equal(new[] { "e1" }, firstError.Select(l => l.Output));
+
+        // e2 was over the limit; it and every stdout line survive in their original order.
+        Assert.Equal(new[] { "o1", "o2", "e2", "o3" }, buf.Drain().Select(l => l.Output));
+    }
+
+    [Fact]
+    public void Drain_ReleasesBytesOnlyForTheLinesItReturned()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(new OutputLine("stdout", "aaaa", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "bb", DateTimeOffset.UtcNow));
+        var bytesBefore = buf.Snapshot().Bytes;
+
+        buf.Drain(category: "stderr");
+
+        var stats = buf.Snapshot();
+        Assert.Equal(1, stats.Lines);
+        Assert.Equal(bytesBefore - ("bb".Length * 2 + 80), stats.Bytes);
+    }
+
+    [Fact]
+    public void Drain_KeptLines_StillCountTowardTheCaps()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 3, maxBytes: 1_000_000);
+        buf.Enqueue(new OutputLine("stdout", "a", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stderr", "b", DateTimeOffset.UtcNow));
+        buf.Enqueue(new OutputLine("stdout", "c", DateTimeOffset.UtcNow));
+
+        buf.Drain(category: "stderr");   // keeps a, c
+
+        buf.Enqueue(Line("d"));
+        buf.Enqueue(Line("e"));          // 4 lines against a cap of 3 -> evict "a"
+
+        var stats = buf.Snapshot();
+        Assert.Equal(3, stats.Lines);
+        Assert.Equal(1, stats.DroppedLines);
+        Assert.Equal(new[] { "c", "d", "e" }, buf.Drain().Select(l => l.Output));
+    }
+
+    [Fact]
+    public void Drain_WithNoMatches_LeavesTheBufferIntact()
+    {
+        var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
+        buf.Enqueue(Line("a"));
+        buf.Enqueue(Line("b"));
+
+        Assert.Empty(buf.Drain(category: "stderr"));
+        Assert.Equal(new[] { "a", "b" }, buf.Drain().Select(l => l.Output));
+    }
+
+    [Fact]
     public void Drain_WithMaxLines_StopsAtLimit()
     {
         var buf = new BoundedOutputBuffer(maxLines: 100, maxBytes: 1_000_000);
@@ -101,9 +178,11 @@ public class BoundedOutputBufferTests
 
         var first3 = buf.Drain(maxLines: 3);
         Assert.Equal(3, first3.Count);
+        Assert.Equal(new[] { "line-0", "line-1", "line-2" }, first3.Select(l => l.Output));
 
         var rest = buf.Drain();
         Assert.Equal(7, rest.Count);
+        Assert.Equal("line-3", rest[0].Output);
     }
 
     [Fact]

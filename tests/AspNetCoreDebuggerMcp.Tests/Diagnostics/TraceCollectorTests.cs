@@ -115,4 +115,39 @@ public class TraceCollectorTests
         Assert.Equal(0, stats.Events);
         Assert.Equal(0, stats.DroppedEvents);
     }
+
+    [Fact]
+    public void Append_ManyEvictions_KeepsTheNewestWindowInOrder()
+    {
+        // Exercises the ring buffer past several wrap-arounds, not just the first eviction.
+        const int cap = 1_000;
+        var c = new TraceCollector(maxEvents: cap);
+        c.Start(new[] { "Foo" }, true, true, true, 10, 10);
+        for (int i = 0; i < 5_000; i++)
+            c.Append(new TraceEvent(i, TraceEventKind.Enter, 1, $"M{i}", null, null, null, null));
+
+        var events = c.Events();
+        Assert.Equal(cap, events.Count);
+        Assert.Equal("M4000", events[0].Method);
+        Assert.Equal("M4999", events[^1].Method);
+        Assert.Equal(4_000, c.BufferStats().DroppedEvents);
+    }
+
+    [Fact]
+    public void DroppedEvents_AreScopedToTheTrace_NotTheCollector()
+    {
+        var c = new TraceCollector(maxEvents: 2);
+        c.Start(new[] { "Foo" }, true, true, true, 10, 10);
+        for (int i = 0; i < 5; i++)
+            c.Append(new TraceEvent(i, TraceEventKind.Enter, 1, $"M{i}", null, null, null, null));
+        Assert.Equal(3, c.BufferStats().DroppedEvents);
+
+        c.Stop();
+        c.Start(new[] { "Bar" }, true, true, true, 10, 10);
+
+        // A fresh trace reports its own drops; the previous trace's count must not carry over.
+        var stats = c.BufferStats();
+        Assert.Equal(0, stats.Events);
+        Assert.Equal(0, stats.DroppedEvents);
+    }
 }

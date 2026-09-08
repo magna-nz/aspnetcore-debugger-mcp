@@ -46,18 +46,36 @@ internal sealed class BoundedOutputBuffer
         }
     }
 
+    // Contributed by gloath.com
+    /// Remove and return the buffered lines matching `category` (all categories when null),
+    /// up to `maxLines`. Lines that do not match, and matching lines beyond `maxLines`, stay
+    /// in the buffer in their original relative order — draining stderr must not throw away
+    /// the stdout a caller has not read yet.
     public IReadOnlyList<OutputLine> Drain(string? category = null, int? maxLines = null)
     {
         var collected = new List<OutputLine>();
         lock (_gate)
         {
-            while (_items.Count > 0)
+            // Rotate the queue exactly once: each item is dequeued, then either collected or
+            // re-enqueued at the tail. After a full pass the kept items are back in their
+            // original relative order, so an early exit is not safe here.
+            int count = _items.Count;
+            for (int i = 0; i < count; i++)
             {
                 var line = _items.Dequeue();
-                _currentBytes -= EstimateSize(line);
-                if (category is null || string.Equals(line.Category, category, StringComparison.OrdinalIgnoreCase))
+                bool matches = category is null
+                    || string.Equals(line.Category, category, StringComparison.OrdinalIgnoreCase);
+                bool underLimit = maxLines is not int m || collected.Count < m;
+
+                if (matches && underLimit)
+                {
+                    _currentBytes -= EstimateSize(line);
                     collected.Add(line);
-                if (maxLines is int m && collected.Count >= m) break;
+                }
+                else
+                {
+                    _items.Enqueue(line);
+                }
             }
         }
         return collected;
