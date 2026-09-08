@@ -16,6 +16,61 @@ namespace AspNetCoreDebuggerMcp.Tests.Integration;
 public class BundledNetcoredbgEndToEndTests
 {
     [Fact]
+    public async Task StackTraceGet_DeepRecursion_ReturnsEveryFrame()
+    {
+        // Regression guard for stack-trace-at-scale: a real 10,000-frame call stack must
+        // come back intact through DAP framing (large `stackTrace` response body) rather
+        // than being truncated or timing out.
+        var bundled = LocateBundledNetcoredbg();
+        if (bundled is null) return;
+
+        var webApiDll = LocateBuiltAssembly("SampleWebApi");
+        var programCs = LocateSourceFile("SampleWebApi", "Program.cs");
+        var port = GetFreeTcpPort();
+        var baseUrl = $"http://127.0.0.1:{port}";
+        const int depth = 10_000;
+        const int baseCaseLine = 31; // `return 0;` inside Recurse's n <= 0 branch
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        await using var manager = new DebugSessionManager();
+
+        await manager.LaunchAsync(
+            program: webApiDll, args: new[] { "--urls", baseUrl },
+            cwd: Path.GetDirectoryName(webApiDll), stopAtEntry: false, env: null, cts.Token);
+
+        await manager.AddLineBreakpointAsync(
+            sourcePath: programCs, line: baseCaseLine,
+            condition: null, hitCondition: null, logMessage: null, cts.Token);
+
+        await WaitForWebApiReadyAsync(baseUrl, cts.Token);
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        var requestTask = http.GetAsync($"{baseUrl}/recurse/{depth}", cts.Token);
+
+        var stop = await manager.WaitForStopAsync(
+            timeout: TimeSpan.FromSeconds(60),
+            maxLocalsPerScope: 5, maxRecentOutputLines: 5, cts.Token);
+        Assert.Equal("breakpoint", stop.Stop.Reason);
+
+        var frames = await manager.GetStackTraceAsync(
+            threadId: stop.Stop.ThreadId, startFrame: 0, levels: depth + 50, raw: false, cts.Token);
+
+        var recurseFrames = frames.Where(f => f.Name.Contains("Recurse")).ToList();
+        Assert.True(recurseFrames.Count >= depth,
+            $"expected at least {depth} 'Recurse' frames, got {recurseFrames.Count} " +
+            $"(total frames: {frames.Count})");
+
+        await manager.ContinueAsync(stop.Stop.ThreadId, cts.Token);
+        var response = await requestTask;
+        Assert.True(response.IsSuccessStatusCode,
+            $"Expected 2xx, got {(int)response.StatusCode}: {response.ReasonPhrase}");
+        var body = await response.Content.ReadAsStringAsync(cts.Token);
+        Assert.Contains($"\"result\":{depth}", body);
+
+        await manager.DisconnectAsync(cts.Token);
+    }
+
+    [Fact]
     public async Task DebugSession_LaunchesWebApi_HitsBreakpointOnRequest()
     {
         var bundled = LocateBundledNetcoredbg();
