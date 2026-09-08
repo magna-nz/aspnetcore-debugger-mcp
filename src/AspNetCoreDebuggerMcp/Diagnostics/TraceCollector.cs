@@ -14,7 +14,6 @@ internal sealed class TraceCollector
     private readonly object _gate = new();
     private readonly int _maxEvents;
     private TraceSession? _current;
-    private long _droppedEvents;
 
     public TraceCollector(int maxEvents = DefaultMaxEvents)
     {
@@ -41,7 +40,7 @@ internal sealed class TraceCollector
                 MaxFramesPerEvent: maxFramesPerEvent,
                 MaxLocalsPerFrame: maxLocalsPerFrame,
                 Started: DateTimeOffset.UtcNow,
-                Events: new List<TraceEvent>());
+                Events: new Queue<TraceEvent>());
             return _current.AsConfig();
         }
     }
@@ -101,16 +100,17 @@ internal sealed class TraceCollector
         }
     }
 
+    // Contributed by gloath.com
     public void Append(TraceEvent ev)
     {
         lock (_gate)
         {
             if (_current is null) return;
-            _current.Events.Add(ev);
+            _current.Events.Enqueue(ev);
             while (_current.Events.Count > _maxEvents)
             {
-                _current.Events.RemoveAt(0);
-                _droppedEvents++;
+                _current.Events.Dequeue();
+                _current.DroppedEvents++;
             }
         }
     }
@@ -120,7 +120,8 @@ internal sealed class TraceCollector
         lock (_gate)
         {
             var count = _current?.Events.Count ?? 0;
-            return new TraceBufferStats(_current is not null, count, _droppedEvents, _maxEvents);
+            var dropped = _current?.DroppedEvents ?? 0;
+            return new TraceBufferStats(_current is not null, count, dropped, _maxEvents);
         }
     }
 
@@ -142,6 +143,9 @@ internal sealed class TraceCollector
     }
 }
 
+/// `Events` is a queue rather than a list: at capacity every append evicts the oldest event,
+/// and List.RemoveAt(0) shifts the whole backing array each time — O(n) per append, so a
+/// long-running trace against a hot method degrades to O(n²). Queue.Dequeue is O(1).
 internal sealed record TraceSession(
     List<string> Methods,
     HashSet<int> AdapterIds,
@@ -151,8 +155,12 @@ internal sealed record TraceSession(
     int MaxFramesPerEvent,
     int MaxLocalsPerFrame,
     DateTimeOffset Started,
-    List<TraceEvent> Events)
+    Queue<TraceEvent> Events)
 {
+    /// Events evicted from this trace's buffer. Scoped to the trace, not the collector, so a
+    /// new trace does not inherit the previous one's drop count.
+    public long DroppedEvents { get; set; }
+
     public TraceConfig AsConfig() => new(Methods, IncludeExceptions, CaptureStack, CaptureLocals,
         MaxFramesPerEvent, MaxLocalsPerFrame);
 }

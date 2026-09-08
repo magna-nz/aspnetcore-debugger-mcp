@@ -78,4 +78,48 @@ public class DapClientTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
     }
+
+    [Fact]
+    public async Task SendRequest_RemovesThePendingEntryOnceTheResponseArrives()
+    {
+        await using var client = new DapClient(Stream.Null, new MemoryStream());
+
+        var task = client.SendRequestAsync("initialize", null, CancellationToken.None);
+        Assert.Equal(1, client.PendingRequestCount);
+
+        client.HandleInbound(new DapMessage { Type = "response", RequestSeq = 1, Success = true });
+        await task;
+
+        Assert.Equal(0, client.PendingRequestCount);
+    }
+
+    [Fact]
+    public async Task SendRequest_WhenTheWriteFails_PropagatesAndDropsThePendingEntry()
+    {
+        await using var client = new DapClient(Stream.Null, new ThrowingStream());
+
+        // The request never reached the adapter, so no response can ever carry its seq.
+        await Assert.ThrowsAsync<IOException>(() =>
+            client.SendRequestAsync("initialize", null, CancellationToken.None));
+
+        Assert.Equal(0, client.PendingRequestCount);
+    }
+
+    /// A stream whose writes always fail, standing in for a netcoredbg process whose stdin
+    /// pipe has already closed.
+    private sealed class ThrowingStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set { } }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("pipe closed");
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+            => ValueTask.FromException(new IOException("pipe closed"));
+    }
 }

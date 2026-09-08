@@ -64,4 +64,52 @@ public class DapProtocolTests
         var read = await DapProtocol.ReadMessageAsync(stream, CancellationToken.None);
         Assert.Equal(json, read);
     }
+
+    [Fact]
+    public async Task ReadMessageAsync_IgnoresUnrelatedHeaderFields()
+    {
+        var bytes = Encoding.UTF8.GetBytes(
+            "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: 2\r\n\r\n{}");
+        using var stream = new MemoryStream(bytes);
+
+        Assert.Equal("{}", await DapProtocol.ReadMessageAsync(stream, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("abc")]      // not a number at all
+    [InlineData("1e3")]      // scientific notation
+    [InlineData("1,024")]    // group separators
+    [InlineData("-1")]       // negative — would throw OverflowException from `new byte[length]`
+    [InlineData("0")]        // zero-length body hands "" to the JSON parser
+    public async Task ReadMessageAsync_ThrowsFormatExceptionOnMalformedContentLength(string value)
+    {
+        var bytes = Encoding.ASCII.GetBytes($"Content-Length: {value}\r\n\r\n");
+        using var stream = new MemoryStream(bytes);
+
+        await Assert.ThrowsAsync<FormatException>(() =>
+            DapProtocol.ReadMessageAsync(stream, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_ThrowsOnContentLengthAboveTheBodyCap()
+    {
+        // A desynchronised stream must not talk us into allocating an arbitrary buffer.
+        var bytes = Encoding.ASCII.GetBytes($"Content-Length: {int.MaxValue}\r\n\r\n");
+        using var stream = new MemoryStream(bytes);
+
+        await Assert.ThrowsAsync<FormatException>(() =>
+            DapProtocol.ReadMessageAsync(stream, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_ThrowsWhenTheHeaderNeverTerminates()
+    {
+        // Without a cap, a peer that never sends "\r\n\r\n" grows the header buffer forever.
+        var garbage = new byte[DapProtocol.MaxHeaderBytes * 2];
+        Array.Fill(garbage, (byte)'x');
+        using var stream = new MemoryStream(garbage);
+
+        await Assert.ThrowsAsync<FormatException>(() =>
+            DapProtocol.ReadMessageAsync(stream, CancellationToken.None));
+    }
 }

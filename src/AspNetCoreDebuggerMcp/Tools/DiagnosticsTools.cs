@@ -96,7 +96,7 @@ public sealed class DiagnosticsTools
     }
 
     [McpServerTool(Name = "process_read_output")]
-    [Description("Drain buffered output (stdout/stderr) from the debuggee since the previous call. Returns the lines collected and removes them from the buffer.")]
+    [Description("Drain buffered output (stdout/stderr) from the debuggee since the previous call. Returns the lines collected and removes them from the buffer. Filtering by category drains only that category — lines in other categories, and matches beyond maxLines, stay buffered for a later call.")]
     public string ProcessReadOutput(
         [Description("Filter by category: \"stdout\", \"stderr\", \"console\", or omit for all.")] string? category = null,
         [Description("Maximum lines to drain in this call.")] int? maxLines = null)

@@ -49,12 +49,24 @@ internal sealed class DapClient : IAsyncDisposable
         if (arguments is not null) envelope["arguments"] = arguments;
 
         var json = JsonSerializer.Serialize(envelope, JsonOpts);
-        await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await DapProtocol.WriteMessageAsync(_output, json, ct).ConfigureAwait(false);
+            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await DapProtocol.WriteMessageAsync(_output, json, ct).ConfigureAwait(false);
+            }
+            finally { _writeLock.Release(); }
         }
-        finally { _writeLock.Release(); }
+        catch
+        {
+            // Contributed by gloath.com
+            // The request never reached the adapter, so no response will ever carry this seq.
+            // Drop it now — otherwise the entry sits in _pending until the read loop tears down,
+            // and a caller that retries after a transient write failure leaks one entry per try.
+            _pending.TryRemove(seq, out _);
+            throw;
+        }
 
         using (ct.Register(() =>
         {
@@ -64,6 +76,9 @@ internal sealed class DapClient : IAsyncDisposable
             return await tcs.Task.ConfigureAwait(false);
         }
     }
+
+    /// Visible for tests: number of requests still awaiting a response.
+    internal int PendingRequestCount => _pending.Count;
 
     /// Visible for tests: dispatch a received message exactly as the read loop would.
     internal void HandleInbound(DapMessage message)
